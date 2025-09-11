@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Back Home AR Experience - Adaptive Scaling</title>
+  <title>Back Home AR Experience</title>
 
   <script src="https://cdn.jsdelivr.net/gh/aframevr/aframe@1.6.0/dist/aframe-master.min.js"></script>
   <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar-nft.js"></script>
@@ -10,267 +10,88 @@
   <style>
     body { margin: 0; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     .arjs-loader {
-      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-      background: rgba(0,0,0,0.85); color: #fff; z-index: 9999;
+      height: 100%; width: 100%; position: absolute; top: 0; left: 0;
+      background: rgba(0,0,0,0.8); z-index: 9999; display: flex; justify-content: center; align-items: center;
+      color: #fff; font-size: 1.1em;
     }
-    .gate {
-      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-      z-index: 10000; background: rgba(0,0,0,0.55); color: #fff; text-align: center; padding: 24px;
+    .tap-overlay {
+      position: absolute; inset: 0; display: none; z-index: 10000;
+      background: rgba(0,0,0,0.55); color: #fff; font-weight: 700;
+      align-items: center; justify-content: center; text-align: center; padding: 24px;
     }
-    .gate[hidden] { display: none; }
-    .btn {
-      margin-top: 12px; background: #4caf50; color: #fff; border: 0; border-radius: 20px; padding: 10px 18px; font-weight: 700; cursor: pointer;
+    .tap-btn {
+      margin-top: 12px; background: #4caf50; color: #fff; border: 0; border-radius: 20px; padding: 10px 18px; font-weight: 700;
     }
-    .debug { position: absolute; top: 8px; left: 8px; z-index: 10001; background: rgba(0,0,0,0.75); color:#fff; padding:6px 8px; border-radius:6px; font-size:12px; }
+    /* Small, unobtrusive Android “sound” chip */
+    .sound-chip {
+      position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%);
+      background: rgba(0,0,0,0.7); color: #fff; padding: 8px 12px; border-radius: 999px; font-size: 14px; z-index: 10001; display: none;
+    }
   </style>
 
   <script>
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
     const isAndroid = /Android/i.test(navigator.userAgent);
 
-    // Auto-fit the plane to the color video aspect ratio
-    AFRAME.registerComponent('fit-video-plane', {
-      schema: { target: {type: 'selector'}, baseWidth: {default: 300} },
-      init() {
-        const plane = this.el;
-        const video = this.data.target;
-        if (!video) return;
-        const setSize = () => {
-          const w = video.videoWidth || 16, h = video.videoHeight || 9;
-          const aspect = w / h;
-          plane.setAttribute('geometry', `primitive: plane; width: ${this.data.baseWidth}; height: ${this.data.baseWidth / aspect}`);
-        };
-        video.addEventListener('loadedmetadata', setSize);
-        if (video.readyState >= 1) setSize();
-      }
-    });
-
-    // Distance-based adaptive scaling component
-    AFRAME.registerComponent('adaptive-scale', {
-      schema: {
-        baseSize: {default: 300},        // Base size at reference distance
-        referenceDistance: {default: 50}, // Reference distance in cm
-        minScale: {default: 0.3},        // Minimum scale factor
-        maxScale: {default: 2.5},        // Maximum scale factor
-        smoothing: {default: 0.15}       // Smoothing factor for scale changes
-      },
-      init() {
-        this.camera = document.querySelector('[camera]');
-        this.marker = this.el.parentNode; // The NFT marker
-        this.currentScale = 1;
-        this.targetScale = 1;
-        this.baseGeometry = null;
-      },
-      tick() {
-        if (!this.camera || !this.marker) return;
-        
-        // Get distance between camera and marker
-        const cameraPos = this.camera.object3D.position;
-        const markerPos = this.marker.object3D.position;
-        const distance = cameraPos.distanceTo(markerPos);
-        
-        // Convert to centimeters (A-Frame uses meters)
-        const distanceCm = distance * 100;
-        
-        // Calculate scale based on distance
-        const scaleRatio = this.data.referenceDistance / distanceCm;
-        this.targetScale = Math.max(this.data.minScale, Math.min(this.data.maxScale, scaleRatio));
-        
-        // Smooth the scale transition
-        this.currentScale += (this.targetScale - this.currentScale) * this.data.smoothing;
-        
-        // Apply scale to the element
-        const newSize = this.data.baseSize * this.currentScale;
-        
-        // Update geometry while maintaining aspect ratio
-        const geometry = this.el.getAttribute('geometry');
-        if (geometry) {
-          const aspectRatio = geometry.height / geometry.width;
-          this.el.setAttribute('geometry', {
-            width: newSize,
-            height: newSize * aspectRatio
-          });
-        }
-        
-        // Debug info
-        const debug = document.getElementById('debug');
-        if (debug) {
-          debug.textContent = `Distance: ${distanceCm.toFixed(0)}cm | Scale: ${this.currentScale.toFixed(2)}x`;
-        }
-      }
-    });
-
-    // Enhanced stabilizer with better smoothing
-    AFRAME.registerComponent('stabilize', {
-      schema: { 
-        positionFactor: {default: 0.2},  // More responsive
-        rotationFactor: {default: 0.15}, // More responsive
-        scaleStabilize: {default: true}   // Whether to stabilize scaling
-      },
-      init() {
-        this.prevPosition = null;
-        this.prevRotation = null;
-        this.prevScale = null;
-      },
-      tick() {
-        const obj = this.el.object3D;
-        
-        // Smooth position
-        if (!this.prevPosition) this.prevPosition = obj.position.clone();
-        this.prevPosition.lerp(obj.position, this.data.positionFactor);
-        obj.position.copy(this.prevPosition);
-        
-        // Smooth rotation
-        if (!this.prevRotation) this.prevRotation = obj.quaternion.clone();
-        this.prevRotation.slerp(obj.quaternion, this.data.rotationFactor);
-        obj.quaternion.copy(this.prevRotation);
-        
-        // Optional scale stabilization (lighter for adaptive scaling)
-        if (this.data.scaleStabilize) {
-          if (!this.prevScale) this.prevScale = obj.scale.clone();
-          this.prevScale.lerp(obj.scale, 0.3); // Lighter scale smoothing
-          obj.scale.copy(this.prevScale);
-        }
-      }
-    });
-
-    // Improved persistence component
-    AFRAME.registerComponent('persistent', {
-      schema: {
-        timeout: {default: 800}, // ms to keep visible after marker lost
-        fadeOut: {default: false} // Disable fade for better performance
-      },
-      init() {
-        this.timeout = null;
-      },
-      markerFound() {
-        this.el.object3D.visible = true;
-        if (this.timeout) {
-          clearTimeout(this.timeout);
-          this.timeout = null;
-        }
-      },
-      markerLost() {
-        if (this.data.timeout > 0) {
-          this.timeout = setTimeout(() => {
-            this.el.object3D.visible = false;
-          }, this.data.timeout);
-        } else {
-          this.el.object3D.visible = false;
-        }
-      }
-    });
-
-    // Enhanced angle-based visibility
-    AFRAME.registerComponent('angle-visibility', {
-      schema: {
-        maxAngle: {default: 60} // Maximum viewing angle in degrees
-      },
-      init() {
-        this.camera = document.querySelector('[camera]');
-        this.marker = this.el.parentNode;
-      },
-      tick() {
-        if (!this.camera || !this.marker) return;
-        
-        // Calculate angle between camera and marker normal
-        const cameraDir = new THREE.Vector3();
-        this.camera.object3D.getWorldDirection(cameraDir);
-        
-        const markerNormal = new THREE.Vector3(0, 0, 1);
-        this.marker.object3D.localToWorld(markerNormal);
-        markerNormal.sub(this.marker.object3D.position).normalize();
-        
-        const angle = Math.acos(cameraDir.dot(markerNormal.negate())) * 180 / Math.PI;
-        
-        // Show/hide based on angle
-        const visible = angle < this.data.maxAngle;
-        this.el.object3D.visible = visible;
-      }
-    });
-
-    // Play audio exactly on marker detection
+    // Your simple videoplayer + cross-platform audio unlock
     AFRAME.registerComponent('videoplayer', {
       init: function () {
-        const debug = (msg) => { 
-          const d = document.getElementById('debug'); 
-          if (d && !d.textContent.includes('Distance:')) d.textContent = msg; 
-        };
-
         const videoColor = document.querySelector('#videoColor');
         const videoAlpha = document.querySelector('#videoAlpha');
-        const gate = document.getElementById('gate');
-        const btn = document.getElementById('enableBtn');
 
-        // Start fully muted to satisfy autoplay rules
-        videoColor.setAttribute('muted', ''); videoColor.muted = true; videoColor.volume = 0;
-        videoAlpha.setAttribute('muted', ''); videoAlpha.muted = true; videoAlpha.volume = 0;
+        // Start both muted for maximum compatibility; we’ll unmute color on tap
+        videoColor.muted = true;
+        videoAlpha.muted = true;
 
-        let audioArmed = false;
-        let audioLive = false;
+        let audioUnlocked = false; // becomes true after first user gesture
+        const tapOverlay = document.getElementById('tapOverlay');
+        const tapBtn = document.getElementById('tapBtn');
+        const soundChip = document.getElementById('soundChip');
 
-        // One explicit gesture to "arm" audio
-        const armAudio = async () => {
-          try {
-            await Promise.allSettled([ videoColor.play(), videoAlpha.play() ]);
-            videoColor.muted = true; videoColor.volume = 0;
-            audioArmed = true;
-            gate.hidden = true;
-            debug('Audio armed. Waiting for marker…');
-          } catch (e) {
-            debug('Tap again to arm audio');
-            console.warn('Arming error:', e);
-          }
+        // iOS: require full overlay; Android: show small “Enable sound” chip
+        if (isIOS) {
+          tapOverlay.style.display = 'flex';
+        } else if (isAndroid) {
+          soundChip.style.display = 'block';
+        }
+
+        const enableAudio = () => {
+          // Try to start both videos muted first (satisfy autoplay policies)
+          Promise.all([
+            videoColor.play().catch(()=>{}),
+            videoAlpha.play().catch(()=>{})
+          ]).then(() => {
+            // Now unmute only the color video and play again to get audio
+            videoColor.muted = false;
+            return videoColor.play().catch(()=>{});
+          }).finally(() => {
+            audioUnlocked = true;
+            tapOverlay.style.display = 'none';
+            soundChip.style.display = 'none';
+          });
         };
-        btn.addEventListener('click', armAudio, { once: true });
 
-        // Marker events
-        this.el.addEventListener('markerFound', async () => {
-          debug('Marker found');
-          
-          // Notify persistence component
-          const videoPlane = document.getElementById('videoPlane');
-          const persistent = videoPlane.components.persistent;
-          if (persistent) persistent.markerFound();
-          
-          // Make sure frames are flowing
+        // Gesture listeners
+        tapBtn.addEventListener('click', enableAudio, { once: true });
+        tapOverlay.addEventListener('click', enableAudio, { once: true });
+        soundChip.addEventListener('click', enableAudio, { once: true });
+        // Also allow any first page tap to unlock audio (Android convenience)
+        window.addEventListener('touchend', function onFirstTouch() {
+          if (!audioUnlocked && (isAndroid || isIOS)) enableAudio();
+          window.removeEventListener('touchend', onFirstTouch);
+        }, { passive: true });
+
+        // Your original marker handlers, with a guard for readiness
+        this.el.addEventListener('markerFound', function () {
+          // If user hasn’t tapped yet, videos will play muted; after tap, audio starts
           if (videoColor.paused) videoColor.play().catch(()=>{});
           if (videoAlpha.paused) videoAlpha.play().catch(()=>{});
-
-          // Start audio if armed
-          if (audioArmed && !audioLive) {
-            try {
-              videoColor.muted = false; videoColor.volume = 1.0;
-              await videoColor.play();
-              audioLive = true;
-              debug('Marker found — audio started');
-            } catch (e) {
-              audioLive = false;
-              gate.hidden = false;
-              debug('Tap to enable audio');
-              console.warn('Unmute-on-detect error:', e);
-            }
-          }
         });
 
-        this.el.addEventListener('markerLost', () => {
-          debug('Marker lost');
-          
-          // Notify persistence component
-          const videoPlane = document.getElementById('videoPlane');
-          const persistent = videoPlane.components.persistent;
-          if (persistent) persistent.markerLost();
-          
-          // Keep videos playing briefly for quick re-detection
-          setTimeout(() => {
-            audioLive = false;
-            videoColor.muted = true; videoColor.volume = 0;
-            if (!videoColor.paused) videoColor.pause();
-            if (!videoAlpha.paused) videoAlpha.pause();
-          }, 300);
+        this.el.addEventListener('markerLost', function () {
+          if (!videoColor.paused) videoColor.pause();
+          if (!videoAlpha.paused) videoAlpha.pause();
         });
-
-        gate.hidden = false;
       }
     });
   </script>
@@ -279,13 +100,15 @@
 <body style="margin: 0; overflow: hidden;">
   <div class="arjs-loader" id="loader"><div>Loading, please wait…</div></div>
 
-  <div class="gate" id="gate" hidden>
+  <!-- iOS tap-to-start overlay -->
+  <div class="tap-overlay" id="tapOverlay">
     <div>
-      <div>Tap once to arm audio. Sound will start when the image is detected.</div>
-      <button class="btn" id="enableBtn">Arm Audio</button>
+      <div>Tap to enable video & audio</div>
+      <button class="tap-btn" id="tapBtn">Enable</button>
     </div>
   </div>
-  <div class="debug" id="debug">Init…</div>
+  <!-- Android sound chip -->
+  <div class="sound-chip" id="soundChip">🔊 Tap to enable sound</div>
 
   <a-scene
     vr-mode-ui="enabled: false;"
@@ -295,6 +118,7 @@
     onloaded="document.getElementById('loader').style.display='none';"
   >
     <a-assets>
+      <!-- Keep playsinline for iOS; start muted; we unmute color on gesture -->
       <video
         id="videoColor"
         src="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/AR_Video02_Color.mp4"
@@ -318,7 +142,7 @@
       ></video>
     </a-assets>
 
-    <!-- Transparency matte shader -->
+    <!-- Shader -->
     <script id="matte-shader" type="x-shader/x-fragment">
       precision mediump float;
       uniform sampler2D videoColor;
@@ -348,7 +172,7 @@
       });
     </script>
 
-    <!-- NFT marker with optimized settings -->
+    <!-- Marker + plane -->
     <a-nft
       videoplayer
       type="nft"
@@ -358,12 +182,7 @@
       smoothTolerance="0.01"
       smoothThreshold="5"
     >
-      <!-- Video plane with adaptive scaling and stabilization -->
-      <a-entity id="videoPlane"
-        fit-video-plane="target: #videoColor; baseWidth: 300"
-        adaptive-scale="baseSize: 300; referenceDistance: 50; minScale: 0.4; maxScale: 2.0; smoothing: 0.12"
-        stabilize="positionFactor: 0.25; rotationFactor: 0.18; scaleStabilize: true"
-        persistent="timeout: 600; fadeOut: false"
+      <a-entity
         geometry="primitive: plane; width: 300; height: 150"
         material="shader: video-matte-shader;
                   videoColor: #videoColor;
@@ -378,3 +197,4 @@
   </a-scene>
 </body>
 </html>
+
