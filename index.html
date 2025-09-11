@@ -22,7 +22,7 @@
     .tap-btn {
       margin-top: 12px; background: #4caf50; color: #fff; border: 0; border-radius: 20px; padding: 10px 18px; font-weight: 700;
     }
-    /* Small, unobtrusive Android “sound” chip */
+    /* Small, unobtrusive Android "sound" chip */
     .sound-chip {
       position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%);
       background: rgba(0,0,0,0.7); color: #fff; padding: 8px 12px; border-radius: 999px; font-size: 14px; z-index: 10001; display: none;
@@ -33,13 +33,19 @@
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
     const isAndroid = /Android/i.test(navigator.userAgent);
 
+    // Audio context for music
+    let audioContext = null;
+    let audioElement = null;
+    let audioSource = null;
+    let isMusicPlaying = false;
+
     // Your simple videoplayer + cross-platform audio unlock
     AFRAME.registerComponent('videoplayer', {
       init: function () {
         const videoColor = document.querySelector('#videoColor');
         const videoAlpha = document.querySelector('#videoAlpha');
 
-        // Start both muted for maximum compatibility; we’ll unmute color on tap
+        // Start both muted for maximum compatibility; we'll unmute color on tap
         videoColor.muted = true;
         videoAlpha.muted = true;
 
@@ -48,7 +54,7 @@
         const tapBtn = document.getElementById('tapBtn');
         const soundChip = document.getElementById('soundChip');
 
-        // iOS: require full overlay; Android: show small “Enable sound” chip
+        // iOS: require full overlay; Android: show small "Enable sound" chip
         if (isIOS) {
           tapOverlay.style.display = 'flex';
         } else if (isAndroid) {
@@ -68,6 +74,9 @@
             audioUnlocked = true;
             tapOverlay.style.display = 'none';
             soundChip.style.display = 'none';
+            
+            // Initialize audio context after user interaction
+            initAudioContext();
           });
         };
 
@@ -81,19 +90,72 @@
           window.removeEventListener('touchend', onFirstTouch);
         }, { passive: true });
 
-        // Your original marker handlers, with a guard for readiness
+        // Marker found handler - play videos and music
         this.el.addEventListener('markerFound', function () {
-          // If user hasn’t tapped yet, videos will play muted; after tap, audio starts
+          // If user hasn't tapped yet, videos will play muted; after tap, audio starts
           if (videoColor.paused) videoColor.play().catch(()=>{});
           if (videoAlpha.paused) videoAlpha.play().catch(()=>{});
+          
+          // Play music when marker is detected
+          playMusic();
         });
 
+        // Marker lost handler - pause videos and music
         this.el.addEventListener('markerLost', function () {
           if (!videoColor.paused) videoColor.pause();
           if (!videoAlpha.paused) videoAlpha.pause();
+          
+          // Pause music when marker is lost
+          pauseMusic();
         });
       }
     });
+    
+    // Initialize audio context
+    function initAudioContext() {
+      if (audioContext) return;
+      
+      try {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        audioElement = document.createElement('audio');
+        audioElement.src = 'https://raw.githack.com/alevalve/AR_Crab_Backhome/main/background_music.mp3'; // Replace with your music URL
+        audioElement.loop = true;
+        
+        audioSource = audioContext.createMediaElementSource(audioElement);
+        audioSource.connect(audioContext.destination);
+      } catch (e) {
+        console.error('Error initializing audio context:', e);
+      }
+    }
+    
+    // Play music function
+    function playMusic() {
+      if (!audioContext || !audioElement || isMusicPlaying) return;
+      
+      try {
+        // Resume audio context if it was suspended
+        if (audioContext.state === 'suspended') {
+          audioContext.resume();
+        }
+        
+        audioElement.play();
+        isMusicPlaying = true;
+      } catch (e) {
+        console.error('Error playing music:', e);
+      }
+    }
+    
+    // Pause music function
+    function pauseMusic() {
+      if (!audioElement || !isMusicPlaying) return;
+      
+      try {
+        audioElement.pause();
+        isMusicPlaying = false;
+      } catch (e) {
+        console.error('Error pausing music:', e);
+      }
+    }
   </script>
 </head>
 
@@ -172,24 +234,27 @@
       });
     </script>
 
-    <!-- Marker + plane -->
+    <!-- Marker + plane with improved stability and proper dimensions -->
     <a-nft
       videoplayer
       type="nft"
       url="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/marker/AR_Image-tracker_Crab"
       smooth="true"
-      smoothCount="10"
-      smoothTolerance="0.01"
-      smoothThreshold="5"
+      smoothCount="20"  <!-- Increased for more stability -->
+      smoothTolerance="0.005"  <!-- Reduced for smoother movement -->
+      smoothThreshold="3"  <!-- Reduced threshold for more responsive tracking -->
+      emitevents="true"
     >
+      <!-- Adjusted dimensions to fit the marker properly -->
       <a-entity
-        geometry="primitive: plane; width: 300; height: 150"
+        geometry="primitive: plane; width: 1; height: 0.5"  <!-- Standardized to real-world units -->
         material="shader: video-matte-shader;
                   videoColor: #videoColor;
                   videoAlpha: #videoAlpha;
                   transparent: true;"
-        position="0 0 0.1"
+        position="0 0 0"
         rotation="-90 0 0"
+        scale="1 1 1"
       ></a-entity>
     </a-nft>
 
@@ -197,4 +262,3 @@
   </a-scene>
 </body>
 </html>
-
