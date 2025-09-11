@@ -376,15 +376,15 @@
     >
       <!-- Plane: auto-fit to color video aspect; enhanced stabilizer for maximum smoothness -->
       <a-entity id="videoPlane"
-        fit-video-plane="target: #videoColor; baseWidth: 225"
+        fit-video-plane="target: #videoColor; baseWidth: 250"
         stabilize="factor: 0.15; smoothing: true"
-        geometry="primitive: plane; width: 225; height: 112.5"
+        geometry="primitive: plane; width: 250; height: 125"
         material="shader: video-matte-shader;
                   videoColor: #videoColor;
                   videoAlpha: #videoAlpha;
                   transparent: true;"
-        position="0 0 0.1"
-        rotation="-90 0 0"
+        position="0 0 0"
+        rotation="0 0 0"
       ></a-entity>
     </a-nft>
 
