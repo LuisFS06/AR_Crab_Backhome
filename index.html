@@ -199,8 +199,6 @@
       }
     </script>
 
-
-
     <script>
       AFRAME.registerShader('enhanced-video-matte-shader', {
         schema: {
@@ -220,8 +218,9 @@
       });
     </script>
 
+    <!-- Enhanced marker with stability improvements -->
     <a-nft
-      adaptive-videoplayer="volume: 0.8" 
+      adaptive-videoplayer="width: 300; height: 150; volume: 0.8"
       type="nft"
       url="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/marker/AR_Image-tracker_Crab"
       smooth="true"
@@ -230,9 +229,7 @@
       smoothThreshold="3"
     >
       <a-entity
-        id="videoPlane"
-        geometry="primitive: plane; width: 1; height: 1"
-        auto-size-to-marker="colorVideo: #videoColor; alphaVideo: #videoAlpha; baseWidth: 1; fit: contain"
+        geometry="primitive: plane; width: 300; height: 150"
         material="shader: enhanced-video-matte-shader;
                   videoColor: #videoColor;
                   videoAlpha: #videoAlpha;
