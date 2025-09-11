@@ -14,23 +14,6 @@
       background: rgba(0,0,0,0.8); z-index: 9999; display: flex; justify-content: center; align-items: center;
       color: #fff; font-size: 1.1em;
     }
-    .controls {
-      position: absolute; top: 16px; left: 16px; z-index: 10001;
-      background: rgba(0,0,0,0.7); padding: 12px; border-radius: 8px;
-      display: none; /* Hidden until marker found */
-    }
-    .control-group {
-      margin-bottom: 8px; color: #fff; font-size: 14px;
-    }
-    .control-group label {
-      display: block; margin-bottom: 4px; font-weight: 600;
-    }
-    .slider {
-      width: 120px; margin-right: 8px;
-    }
-    .value-display {
-      color: #4caf50; font-weight: 600; min-width: 40px; display: inline-block;
-    }
     .audio-status {
       position: absolute; bottom: 16px; right: 16px; z-index: 10001;
       background: rgba(0,0,0,0.8); color: #fff; padding: 8px 12px;
@@ -64,7 +47,6 @@
       init: function () {
         const videoColor = document.querySelector('#videoColor');
         const videoAlpha = document.querySelector('#videoAlpha');
-        const controls = document.getElementById('controls');
         const audioStatus = document.getElementById('audioStatus');
         const tapOverlay = document.getElementById('tapOverlay');
         const tapBtn = document.getElementById('tapBtn');
@@ -139,7 +121,6 @@
         // Marker detection handlers - AUDIO ONLY PLAYS WHEN MARKER IS DETECTED
         this.el.addEventListener('markerFound', () => {
           markerVisible = true;
-          controls.style.display = 'block';
           
           // Start videos - with audio only if already unlocked
           this.startVideos(audioUnlocked);
@@ -147,51 +128,7 @@
 
         this.el.addEventListener('markerLost', () => {
           markerVisible = false;
-          controls.style.display = 'none';
           this.stopVideos();
-        });
-
-        // Control handlers
-        this.setupControls();
-      },
-
-      setupControls: function() {
-        const widthSlider = document.getElementById('widthSlider');
-        const heightSlider = document.getElementById('heightSlider');
-        const volumeSlider = document.getElementById('volumeSlider');
-        const widthValue = document.getElementById('widthValue');
-        const heightValue = document.getElementById('heightValue');
-        const volumeValue = document.getElementById('volumeValue');
-        const videoEntity = this.el.querySelector('a-entity');
-        const videoColor = document.querySelector('#videoColor');
-
-        // Initialize slider values
-        widthSlider.value = this.data.width;
-        heightSlider.value = this.data.height;
-        volumeSlider.value = this.data.volume * 100;
-        widthValue.textContent = this.data.width;
-        heightValue.textContent = this.data.height;
-        volumeValue.textContent = Math.round(this.data.volume * 100) + '%';
-
-        // Width control
-        widthSlider.addEventListener('input', (e) => {
-          const newWidth = parseInt(e.target.value);
-          widthValue.textContent = newWidth;
-          videoEntity.setAttribute('geometry', `primitive: plane; width: ${newWidth}; height: ${heightSlider.value}`);
-        });
-
-        // Height control
-        heightSlider.addEventListener('input', (e) => {
-          const newHeight = parseInt(e.target.value);
-          heightValue.textContent = newHeight;
-          videoEntity.setAttribute('geometry', `primitive: plane; width: ${widthSlider.value}; height: ${newHeight}`);
-        });
-
-        // Volume control
-        volumeSlider.addEventListener('input', (e) => {
-          const newVolume = e.target.value / 100;
-          volumeValue.textContent = Math.round(newVolume * 100) + '%';
-          videoColor.volume = newVolume;
         });
       }
     });
@@ -200,25 +137,6 @@
 
 <body style="margin: 0; overflow: hidden;">
   <div class="arjs-loader" id="loader"><div>Loading, please wait…</div></div>
-
-  <!-- Real-time controls (shown only when marker is detected) -->
-  <div class="controls" id="controls">
-    <div class="control-group">
-      <label>Width:</label>
-      <input type="range" class="slider" id="widthSlider" min="100" max="500" step="10">
-      <span class="value-display" id="widthValue">300</span>
-    </div>
-    <div class="control-group">
-      <label>Height:</label>
-      <input type="range" class="slider" id="heightSlider" min="75" max="300" step="5">
-      <span class="value-display" id="heightValue">150</span>
-    </div>
-    <div class="control-group">
-      <label>Volume:</label>
-      <input type="range" class="slider" id="volumeSlider" min="0" max="100" step="5">
-      <span class="value-display" id="volumeValue">80%</span>
-    </div>
-  </div>
 
   <!-- Audio status indicator -->
   <div class="audio-status" id="audioStatus">🔇 Audio OFF</div>
@@ -300,9 +218,9 @@
       });
     </script>
 
-    <!-- Simple marker with fixed size -->
+    <!-- Enhanced marker with stability improvements -->
     <a-nft
-      simple-videoplayer="volume: 0.8"
+      adaptive-videoplayer="width: 300; height: 150; volume: 0.8"
       type="nft"
       url="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/marker/AR_Image-tracker_Crab"
       smooth="true"
@@ -311,7 +229,7 @@
       smoothThreshold="3"
     >
       <a-entity
-        geometry="primitive: plane; width: 200; height: 100"
+        geometry="primitive: plane; width: 300; height: 150"
         material="shader: enhanced-video-matte-shader;
                   videoColor: #videoColor;
                   videoAlpha: #videoAlpha;
