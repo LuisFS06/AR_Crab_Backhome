@@ -200,6 +200,37 @@
     </script>
 
     <script>
+      AFRAME.registerComponent('adjustable-geometry', {
+        schema: {
+          primitive: { type: 'string', default: 'plane' },
+          width: { type: 'number', default: 1 },
+          height: { type: 'number', default: 1 },
+          depth: { type: 'number', default: 1 },
+          // Add other geometry properties as needed
+        },
+        
+        init: function () {
+          this.updateGeometry();
+        },
+        
+        update: function () {
+          this.updateGeometry();
+        },
+        
+        updateGeometry: function () {
+          const data = this.data;
+          this.el.setAttribute('geometry', {
+            primitive: data.primitive,
+            width: data.width,
+            height: data.height,
+            depth: data.depth
+           
+          });
+        }
+      });
+    </script>
+
+    <script>
       AFRAME.registerShader('enhanced-video-matte-shader', {
         schema: {
           videoColor: { type: 'map', is: 'uniform' },
@@ -228,8 +259,8 @@
       smoothTolerance="0.005"
       smoothThreshold="3"
     >
-      <a-entity
-        geometry="primitive: plane; width: 300; height: 150"
+        <a-entity
+        adjustable-geometry="primitive: plane; width: 300; height: 150"
         material="shader: enhanced-video-matte-shader;
                   videoColor: #videoColor;
                   videoAlpha: #videoAlpha;
