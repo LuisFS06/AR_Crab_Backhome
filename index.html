@@ -132,6 +132,129 @@
         });
       }
     });
+
+    // Distance-based scaling component
+    AFRAME.registerComponent('distance-scaler', {
+      schema: {
+        target: { type: 'selector' },
+        minScale: { type: 'number', default: 0.5 },
+        maxScale: { type: 'number', default: 2.0 },
+        minDistance: { type: 'number', default: 0.3 },
+        maxDistance: { type: 'number', default: 2.0 },
+        smoothing: { type: 'number', default: 0.1 }
+      },
+
+      init: function () {
+        this.camera = document.querySelector('[camera]');
+        this.targetScale = 1;
+        this.currentScale = 1;
+        this.isMarkerVisible = false;
+
+        // Listen for marker events
+        this.el.addEventListener('markerFound', () => {
+          this.isMarkerVisible = true;
+        });
+
+        this.el.addEventListener('markerLost', () => {
+          this.isMarkerVisible = false;
+        });
+      },
+
+      tick: function () {
+        if (!this.isMarkerVisible || !this.camera || !this.data.target) return;
+
+        // Calculate distance between camera and marker
+        const cameraPos = this.camera.object3D.position;
+        const markerPos = this.el.object3D.position;
+        const distance = cameraPos.distanceTo(markerPos);
+
+        // Map distance to scale factor (closer = bigger)
+        const normalizedDistance = Math.max(0, Math.min(1, 
+          (distance - this.data.minDistance) / (this.data.maxDistance - this.data.minDistance)
+        ));
+        
+        // Invert so closer distance = larger scale
+        this.targetScale = this.data.maxScale - (normalizedDistance * (this.data.maxScale - this.data.minScale));
+
+        // Smooth the scaling
+        this.currentScale += (this.targetScale - this.currentScale) * this.data.smoothing;
+
+        // Apply scale to the target element
+        this.data.target.object3D.scale.setScalar(this.currentScale);
+      }
+    });
+
+    // Auto-sizing component
+    AFRAME.registerComponent('auto-size-to-marker', {
+      schema: {
+        colorVideo: { type: 'selector' },   
+        alphaVideo: { type: 'selector' },   
+        baseWidth: { type: 'number', default: 1 }, 
+        fit: { type: 'string', default: 'contain' }
+      },
+      
+      init: function () {
+        this.applied = false;
+        this.retryCount = 0;
+        this.maxRetries = 10;
+        
+        setTimeout(() => this.checkAndApply(), 100);
+      },
+
+      checkAndApply: function() {
+        if (this.applied || this.retryCount >= this.maxRetries) return;
+        
+        const el = this.el;
+        const colorVid = this.data.colorVideo;
+        
+        if (!colorVid) {
+          console.warn('Color video element not found');
+          return;
+        }
+
+        const applySize = () => {
+          if (this.applied) return;
+          
+          let vw = colorVid.videoWidth || colorVid.naturalWidth;
+          let vh = colorVid.videoHeight || colorVid.naturalHeight;
+          
+          if (!vw || !vh) {
+            this.retryCount++;
+            if (this.retryCount < this.maxRetries) {
+              setTimeout(() => this.checkAndApply(), 200);
+            }
+            return;
+          }
+
+          const videoAR = vw / vh;
+          let width = this.data.baseWidth;
+          let height = width / videoAR;
+
+          if (this.data.fit === 'cover') {
+            height = this.data.baseWidth;      
+            width = height * videoAR;
+          }
+
+          el.setAttribute('geometry', {
+            primitive: 'plane',
+            width: width,
+            height: height
+          });
+          
+          this.applied = true;
+          console.log(`Auto-size applied: ${width.toFixed(2)} x ${height.toFixed(2)}`);
+        };
+
+        if (colorVid.readyState >= 1) {
+          applySize();
+        } else {
+          colorVid.addEventListener('loadedmetadata', applySize, { once: true });
+          colorVid.addEventListener('canplay', applySize, { once: true });
+        }
+        
+        setTimeout(applySize, 500);
+      }
+    });
   </script>
 </head>
 
@@ -199,8 +322,6 @@
       }
     </script>
 
-
-
     <script>
       AFRAME.registerShader('enhanced-video-matte-shader', {
         schema: {
@@ -222,6 +343,7 @@
 
     <a-nft
       adaptive-videoplayer="volume: 0.8" 
+      distance-scaler="target: #videoPlane; minScale: 0.5; maxScale: 2.5; minDistance: 0.3; maxDistance: 1.5; smoothing: 0.15"
       type="nft"
       url="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/marker/AR_Image-tracker_Crab"
       smooth="true"
