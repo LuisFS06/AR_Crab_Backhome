@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Stable Back Home AR Experience</title>
+  <title>Back Home AR Experience</title>
 
   <script src="https://cdn.jsdelivr.net/gh/aframevr/aframe@1.6.0/dist/aframe-master.min.js"></script>
   <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar-nft.js"></script>
@@ -28,74 +28,113 @@
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
     const isAndroid = /Android/i.test(navigator.userAgent);
 
-    // Enhanced video plane fitting
+    // Auto-fit the plane to the color video aspect ratio
     AFRAME.registerComponent('fit-video-plane', {
       schema: { target: {type: 'selector'}, baseWidth: {default: 300} },
       init() {
         const plane = this.el;
         const video = this.data.target;
         if (!video) return;
-        
         const setSize = () => {
           const w = video.videoWidth || 16, h = video.videoHeight || 9;
           const aspect = w / h;
           plane.setAttribute('geometry', `primitive: plane; width: ${this.data.baseWidth}; height: ${this.data.baseWidth / aspect}`);
         };
-        
         video.addEventListener('loadedmetadata', setSize);
         if (video.readyState >= 1) setSize();
       }
     });
 
-    // Enhanced stabilization with position, rotation, and scale smoothing
+    // Enhanced content stabilizer with smooth position interpolation
     AFRAME.registerComponent('stabilize', {
       schema: { 
-        positionFactor: {default: 0.1},
-        rotationFactor: {default: 0.2},
-        scaleFactor: {default: 0.3}
+        factor: {default: 0.15},
+        smoothing: {default: true}
       },
-      
       init() {
-        this.prevPosition = new THREE.Vector3();
-        this.prevRotation = new THREE.Euler();
-        this.prevScale = new THREE.Vector3(1, 1, 1);
+        this.isTracking = false;
+        this.targetPosition = { x: 0, y: 0, z: 0 };
+        this.currentPosition = { x: 0, y: 0, z: 0 };
+        this.smoothingFactor = this.data.factor;
         
-        // Store initial values
-        const obj = this.el.object3D;
-        this.prevPosition.copy(obj.position);
-        this.prevRotation.copy(obj.rotation);
-        this.prevScale.copy(obj.scale);
+        // Listen for marker events to control tracking state
+        const marker = this.el.closest('a-nft');
+        if (marker) {
+          marker.addEventListener('markerFound', () => {
+            this.isTracking = true;
+            this.startInterpolation();
+          });
+          
+          marker.addEventListener('markerLost', () => {
+            // Don't immediately stop tracking - use buffer
+            setTimeout(() => {
+              this.isTracking = false;
+            }, 500); // 500ms stability buffer
+          });
+        }
       },
       
       tick() {
-        const obj = this.el.object3D;
+        if (!this.data.smoothing) {
+          // Original simple stabilization
+          const p = this.el.object3D.position;
+          if (!this.prev) this.prev = p.clone();
+          this.prev.lerp(p, this.data.factor);
+          this.el.object3D.position.copy(this.prev);
+        }
+      },
+      
+      startInterpolation() {
+        if (!this.data.smoothing || !this.isTracking) return;
         
-        // Smooth position
-        this.prevPosition.lerp(obj.position, this.data.positionFactor);
-        obj.position.copy(this.prevPosition);
+        const interpolate = () => {
+          if (this.isTracking) {
+            const currentPos = this.el.object3D.position;
+            
+            // Update target position from current transform
+            this.targetPosition.x = currentPos.x;
+            this.targetPosition.y = currentPos.y;
+            this.targetPosition.z = currentPos.z;
+            
+            // Smooth interpolation
+            this.currentPosition.x += (this.targetPosition.x - this.currentPosition.x) * this.smoothingFactor;
+            this.currentPosition.y += (this.targetPosition.y - this.currentPosition.y) * this.smoothingFactor;
+            this.currentPosition.z += (this.targetPosition.z - this.currentPosition.z) * this.smoothingFactor;
+            
+            // Apply smoothed position
+            this.el.object3D.position.set(
+              this.currentPosition.x,
+              this.currentPosition.y,
+              this.currentPosition.z
+            );
+            
+            requestAnimationFrame(interpolate);
+          }
+        };
         
-        // Smooth rotation using slerp (spherical interpolation)
-        const targetQuat = new THREE.Quaternion().setFromEuler(obj.rotation);
-        const currentQuat = new THREE.Quaternion().setFromEuler(this.prevRotation);
-        currentQuat.slerp(targetQuat, this.data.rotationFactor);
-        obj.rotation.setFromQuaternion(currentQuat);
-        this.prevRotation.copy(obj.rotation);
-        
-        // Smooth scale
-        this.prevScale.lerp(obj.scale, this.data.scaleFactor);
-        obj.scale.copy(this.prevScale);
+        interpolate();
       }
     });
 
-    // Play audio exactly on marker detection
+    // Enhanced videoplayer with stability features and improved audio handling
     AFRAME.registerComponent('videoplayer', {
       init: function () {
-        const debug = (msg) => { const d = document.getElementById('debug'); if (d) d.textContent = msg; };
+        const debug = (msg) => { 
+          const d = document.getElementById('debug'); 
+          if (d) d.textContent = msg;
+          console.log(`Platform: ${isIOS ? 'iOS' : isAndroid ? 'Android' : 'Desktop'} - ${msg}`);
+        };
 
         const videoColor = document.querySelector('#videoColor');
         const videoAlpha = document.querySelector('#videoAlpha');
         const gate = document.getElementById('gate');
         const btn = document.getElementById('enableBtn');
+
+        // Stability variables
+        let isTracking = false;
+        let stabilityTimer = null;
+        let lastMarkerTime = 0;
+        let hasUserInteracted = false;
 
         // Start fully muted to satisfy autoplay rules
         videoColor.setAttribute('muted', ''); videoColor.muted = true; videoColor.volume = 0;
@@ -104,9 +143,51 @@
         let audioArmed = false;   // set to true after the ONE user gesture
         let audioLive  = false;   // true while marker is found & color is unmuted
 
+        // Enhanced play function with platform-specific optimizations
+        const playVideos = () => {
+          debug('Attempting to play videos...');
+          try {
+            if (videoColor && videoColor.paused) {
+              if (hasUserInteracted || isAndroid) {
+                videoColor.muted = false;
+                videoColor.volume = 1.0;
+              }
+              
+              const playPromise1 = videoColor.play();
+              if (playPromise1 !== undefined) {
+                playPromise1.then(() => {
+                  debug(`Color video playing ${videoColor.muted ? 'muted' : 'with sound'}`);
+                }).catch(error => {
+                  console.error('Color video play failed:', error);
+                  if (isIOS && !videoColor.muted) {
+                    videoColor.muted = true;
+                    videoColor.play().then(() => {
+                      debug('Color video playing muted (fallback)');
+                    });
+                  }
+                });
+              }
+            }
+            
+            if (videoAlpha && videoAlpha.paused) {
+              const playPromise2 = videoAlpha.play();
+              if (playPromise2 !== undefined) {
+                playPromise2.then(() => {
+                  debug('Alpha video playing');
+                }).catch(error => {
+                  console.error('Alpha video play failed:', error);
+                });
+              }
+            }
+          } catch (error) {
+            console.error('Error playing videos:', error);
+          }
+        };
+
         // One explicit gesture to "arm" audio (no sound yet)
         const armAudio = async () => {
           try {
+            hasUserInteracted = true;
             // Prime decoding so unmute on detection is instant
             await Promise.allSettled([ videoColor.play(), videoAlpha.play() ]);
             // Keep muted until the marker is detected
@@ -121,9 +202,42 @@
         };
         btn.addEventListener('click', armAudio, { once: true });
 
-        // Marker events
+        // iOS-specific interaction handling
+        if (isIOS) {
+          const enableInteraction = () => {
+            if (!hasUserInteracted) {
+              hasUserInteracted = true;
+              debug('iOS: User interaction detected');
+              if (isTracking) playVideos();
+            }
+          };
+          document.addEventListener('touchstart', enableInteraction, { once: true });
+          document.addEventListener('click', enableInteraction, { once: true });
+        }
+
+        // Android autoplay attempt
+        if (isAndroid) {
+          setTimeout(() => {
+            if (!hasUserInteracted) {
+              debug('Android: Attempting autoplay');
+              hasUserInteracted = true;
+              if (isTracking) playVideos();
+            }
+          }, 1000);
+        }
+
+        // Enhanced marker found with stability features
         this.el.addEventListener('markerFound', async () => {
           debug('Marker found');
+          isTracking = true;
+          lastMarkerTime = Date.now();
+          
+          // Clear any stability timeout
+          if (stabilityTimer) {
+            clearTimeout(stabilityTimer);
+            stabilityTimer = null;
+          }
+
           // Make sure frames are flowing
           if (videoColor.paused) videoColor.play().catch(()=>{});
           if (videoAlpha.paused) videoAlpha.play().catch(()=>{});
@@ -142,20 +256,35 @@
               debug('Tap to enable audio');
               console.warn('Unmute-on-detect error:', e);
             }
+          } else if (hasUserInteracted || isAndroid) {
+            playVideos();
+          } else if (isIOS) {
+            gate.hidden = false;
+            debug('Tap anywhere to enable video playback');
           }
         });
 
+        // Enhanced marker lost with stability buffer
         this.el.addEventListener('markerLost', () => {
           debug('Marker lost');
-          // Stop everything and re-mute so the next detection starts fresh
-          audioLive = false;
-          videoColor.muted = true; videoColor.volume = 0;
-          if (!videoColor.paused) videoColor.pause();
-          if (!videoAlpha.paused) videoAlpha.pause();
+          
+          // Add stability buffer - don't immediately stop tracking
+          stabilityTimer = setTimeout(() => {
+            isTracking = false;
+            audioLive = false;
+            
+            // Stop everything and re-mute so the next detection starts fresh
+            videoColor.muted = true; videoColor.volume = 0;
+            if (!videoColor.paused) videoColor.pause();
+            if (!videoAlpha.paused) videoAlpha.pause();
+            
+            debug('Tracking stopped after stability buffer');
+          }, 500); // 500ms buffer before stopping
         });
 
         // Show the gate for one clean gesture on any platform
         gate.hidden = false;
+        debug(`Platform detected: ${isIOS ? 'iOS' : isAndroid ? 'Android' : 'Desktop'}`);
       }
     });
   </script>
@@ -175,10 +304,9 @@
 
   <a-scene
     vr-mode-ui="enabled: false;"
-    renderer="logarithmicDepthBuffer: true; precision: high; antialias: true;"
+    renderer="logarithmicDepthBuffer: true; precision: medium;"
     embedded
-    arjs="sourceType: webcam; trackingMethod: best; debugUIEnabled: false; 
-          sourceWidth: 1280; sourceHeight: 720; displayWidth: 1280; displayHeight: 720;"
+    arjs="sourceType: webcam; trackingMethod: best; debugUIEnabled: false;"
     onloaded="document.getElementById('loader').style.display='none';"
   >
     <a-assets>
@@ -186,7 +314,7 @@
       <video
         id="videoColor"
         src="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/AR_Video02_Color.mp4"
-        preload="auto"
+        preload="metadata"
         loop
         muted
         crossorigin="anonymous"
@@ -197,7 +325,7 @@
       <video
         id="videoAlpha"
         src="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/AR_Video02_Alpha.mp4"
-        preload="auto"
+        preload="metadata"
         loop
         muted
         crossorigin="anonymous"
@@ -236,21 +364,20 @@
       });
     </script>
 
-    <!-- NFT marker with enhanced smoothing -->
+    <!-- NFT marker with enhanced smoothing and stability -->
     <a-nft
       videoplayer
       type="nft"
       url="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/marker/AR_Image-tracker_Crab"
       smooth="true"
-      smoothCount="20"
-      smoothTolerance="0.001"
+      smoothCount="15"
+      smoothTolerance="0.005"
       smoothThreshold="3"
-      emitevents="true"
     >
-      <!-- Plane: auto-fit to color video aspect; enhanced stabilizer -->
+      <!-- Plane: auto-fit to color video aspect; enhanced stabilizer for maximum smoothness -->
       <a-entity id="videoPlane"
         fit-video-plane="target: #videoColor; baseWidth: 300"
-        stabilize="positionFactor: 0.08; rotationFactor: 0.15; scaleFactor: 0.2"
+        stabilize="factor: 0.15; smoothing: true"
         geometry="primitive: plane; width: 300; height: 150"
         material="shader: video-matte-shader;
                   videoColor: #videoColor;
