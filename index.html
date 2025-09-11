@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Back Home AR Experience</title>
+  <title>Back Home AR Experience - Enhanced Stability</title>
 
   <script src="https://cdn.jsdelivr.net/gh/aframevr/aframe@1.6.0/dist/aframe-master.min.js"></script>
   <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar-nft.js"></script>
@@ -10,88 +10,233 @@
   <style>
     body { margin: 0; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     .arjs-loader {
-      height: 100%; width: 100%; position: absolute; top: 0; left: 0;
-      background: rgba(0,0,0,0.8); z-index: 9999; display: flex; justify-content: center; align-items: center;
-      color: #fff; font-size: 1.1em;
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.85); color: #fff; z-index: 9999;
     }
-    .tap-overlay {
-      position: absolute; inset: 0; display: none; z-index: 10000;
-      background: rgba(0,0,0,0.55); color: #fff; font-weight: 700;
-      align-items: center; justify-content: center; text-align: center; padding: 24px;
+    .gate {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      z-index: 10000; background: rgba(0,0,0,0.55); color: #fff; text-align: center; padding: 24px;
     }
-    .tap-btn {
-      margin-top: 12px; background: #4caf50; color: #fff; border: 0; border-radius: 20px; padding: 10px 18px; font-weight: 700;
+    .gate[hidden] { display: none; }
+    .btn {
+      margin-top: 12px; background: #4caf50; color: #fff; border: 0; border-radius: 20px; padding: 10px 18px; font-weight: 700; cursor: pointer;
     }
-    /* Small, unobtrusive Android “sound” chip */
-    .sound-chip {
-      position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%);
-      background: rgba(0,0,0,0.7); color: #fff; padding: 8px 12px; border-radius: 999px; font-size: 14px; z-index: 10001; display: none;
-    }
+    .debug { position: absolute; top: 8px; left: 8px; z-index: 10001; background: rgba(0,0,0,0.75); color:#fff; padding:6px 8px; border-radius:6px; font-size:12px; }
   </style>
 
   <script>
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
     const isAndroid = /Android/i.test(navigator.userAgent);
 
-    // Your simple videoplayer + cross-platform audio unlock
+    // Auto-fit the plane to the color video aspect ratio
+    AFRAME.registerComponent('fit-video-plane', {
+      schema: { target: {type: 'selector'}, baseWidth: {default: 300} },
+      init() {
+        const plane = this.el;
+        const video = this.data.target;
+        if (!video) return;
+        const setSize = () => {
+          const w = video.videoWidth || 16, h = video.videoHeight || 9;
+          const aspect = w / h;
+          plane.setAttribute('geometry', `primitive: plane; width: ${this.data.baseWidth}; height: ${this.data.baseWidth / aspect}`);
+        };
+        video.addEventListener('loadedmetadata', setSize);
+        if (video.readyState >= 1) setSize();
+      }
+    });
+
+    // Enhanced stabilizer with position, rotation, and scale smoothing
+    AFRAME.registerComponent('stabilize', {
+      schema: { 
+        positionFactor: {default: 0.1},
+        rotationFactor: {default: 0.08},
+        scaleFactor: {default: 0.12},
+        hideThreshold: {default: 0.5}, // seconds before hiding on lost tracking
+        showThreshold: {default: 0.1}   // seconds of stable tracking before showing
+      },
+      init() {
+        this.prevPosition = null;
+        this.prevRotation = null;
+        this.prevScale = null;
+        this.trackingLost = false;
+        this.lostTime = 0;
+        this.foundTime = 0;
+        this.isVisible = true;
+      },
+      tick(time, deltaTime) {
+        const obj = this.el.object3D;
+        const parent = this.el.parentNode;
+        
+        // Check if parent (marker) is visible
+        const markerVisible = parent && parent.object3D.visible;
+        
+        if (markerVisible) {
+          this.foundTime += deltaTime / 1000;
+          this.lostTime = 0;
+          
+          // Smooth position
+          if (!this.prevPosition) this.prevPosition = obj.position.clone();
+          this.prevPosition.lerp(obj.position, this.data.positionFactor);
+          obj.position.copy(this.prevPosition);
+          
+          // Smooth rotation
+          if (!this.prevRotation) this.prevRotation = obj.quaternion.clone();
+          this.prevRotation.slerp(obj.quaternion, this.data.rotationFactor);
+          obj.quaternion.copy(this.prevRotation);
+          
+          // Smooth scale
+          if (!this.prevScale) this.prevScale = obj.scale.clone();
+          this.prevScale.lerp(obj.scale, this.data.scaleFactor);
+          obj.scale.copy(this.prevScale);
+          
+          // Show object if stable for enough time
+          if (this.foundTime > this.data.showThreshold) {
+            if (!this.isVisible) {
+              this.el.object3D.visible = true;
+              this.isVisible = true;
+            }
+          }
+        } else {
+          this.lostTime += deltaTime / 1000;
+          this.foundTime = 0;
+          
+          // Hide object if tracking lost for too long
+          if (this.lostTime > this.data.hideThreshold && this.isVisible) {
+            this.el.object3D.visible = false;
+            this.isVisible = false;
+          }
+        }
+      }
+    });
+
+    // Persistence component to maintain object visibility during brief tracking losses
+    AFRAME.registerComponent('persistent', {
+      schema: {
+        timeout: {default: 1000}, // ms to keep visible after marker lost
+        fadeOut: {default: true}
+      },
+      init() {
+        this.visible = false;
+        this.timeout = null;
+        this.originalOpacity = 1;
+      },
+      markerFound() {
+        this.visible = true;
+        this.el.object3D.visible = true;
+        if (this.timeout) {
+          clearTimeout(this.timeout);
+          this.timeout = null;
+        }
+        // Restore full opacity
+        const material = this.el.getAttribute('material');
+        if (material) {
+          this.el.setAttribute('material', 'opacity', this.originalOpacity);
+        }
+      },
+      markerLost() {
+        if (this.data.timeout > 0) {
+          this.timeout = setTimeout(() => {
+            this.visible = false;
+            this.el.object3D.visible = false;
+          }, this.data.timeout);
+          
+          // Optional fade out effect
+          if (this.data.fadeOut) {
+            const material = this.el.getAttribute('material');
+            if (material) {
+              this.el.setAttribute('material', 'opacity', 0.3);
+            }
+          }
+        } else {
+          this.visible = false;
+          this.el.object3D.visible = false;
+        }
+      }
+    });
+
+    // Play audio exactly on marker detection (after a single prior tap to "arm" audio)
     AFRAME.registerComponent('videoplayer', {
       init: function () {
+        const debug = (msg) => { const d = document.getElementById('debug'); if (d) d.textContent = msg; };
+
         const videoColor = document.querySelector('#videoColor');
         const videoAlpha = document.querySelector('#videoAlpha');
+        const gate = document.getElementById('gate');
+        const btn = document.getElementById('enableBtn');
 
-        // Start both muted for maximum compatibility; we’ll unmute color on tap
-        videoColor.muted = true;
-        videoAlpha.muted = true;
+        // Start fully muted to satisfy autoplay rules
+        videoColor.setAttribute('muted', ''); videoColor.muted = true; videoColor.volume = 0;
+        videoAlpha.setAttribute('muted', ''); videoAlpha.muted = true; videoAlpha.volume = 0;
 
-        let audioUnlocked = false; // becomes true after first user gesture
-        const tapOverlay = document.getElementById('tapOverlay');
-        const tapBtn = document.getElementById('tapBtn');
-        const soundChip = document.getElementById('soundChip');
+        let audioArmed = false;   // set to true after the ONE user gesture
+        let audioLive  = false;   // true while marker is found & color is unmuted
 
-        // iOS: require full overlay; Android: show small “Enable sound” chip
-        if (isIOS) {
-          tapOverlay.style.display = 'flex';
-        } else if (isAndroid) {
-          soundChip.style.display = 'block';
-        }
-
-        const enableAudio = () => {
-          // Try to start both videos muted first (satisfy autoplay policies)
-          Promise.all([
-            videoColor.play().catch(()=>{}),
-            videoAlpha.play().catch(()=>{})
-          ]).then(() => {
-            // Now unmute only the color video and play again to get audio
-            videoColor.muted = false;
-            return videoColor.play().catch(()=>{});
-          }).finally(() => {
-            audioUnlocked = true;
-            tapOverlay.style.display = 'none';
-            soundChip.style.display = 'none';
-          });
+        // One explicit gesture to "arm" audio (no sound yet)
+        const armAudio = async () => {
+          try {
+            // Prime decoding so unmute on detection is instant
+            await Promise.allSettled([ videoColor.play(), videoAlpha.play() ]);
+            // Keep muted until the marker is detected
+            videoColor.muted = true;  videoColor.volume = 0;
+            audioArmed = true;
+            gate.hidden = true;
+            debug('Audio armed. Waiting for marker…');
+          } catch (e) {
+            debug('Tap again to arm audio');
+            console.warn('Arming error:', e);
+          }
         };
+        btn.addEventListener('click', armAudio, { once: true });
 
-        // Gesture listeners
-        tapBtn.addEventListener('click', enableAudio, { once: true });
-        tapOverlay.addEventListener('click', enableAudio, { once: true });
-        soundChip.addEventListener('click', enableAudio, { once: true });
-        // Also allow any first page tap to unlock audio (Android convenience)
-        window.addEventListener('touchend', function onFirstTouch() {
-          if (!audioUnlocked && (isAndroid || isIOS)) enableAudio();
-          window.removeEventListener('touchend', onFirstTouch);
-        }, { passive: true });
-
-        // Your original marker handlers, with a guard for readiness
-        this.el.addEventListener('markerFound', function () {
-          // If user hasn’t tapped yet, videos will play muted; after tap, audio starts
+        // Marker events with enhanced stability handling
+        this.el.addEventListener('markerFound', async () => {
+          debug('Marker found');
+          
+          // Notify persistence component
+          const videoPlane = document.getElementById('videoPlane');
+          const persistent = videoPlane.components.persistent;
+          if (persistent) persistent.markerFound();
+          
+          // Make sure frames are flowing
           if (videoColor.paused) videoColor.play().catch(()=>{});
           if (videoAlpha.paused) videoAlpha.play().catch(()=>{});
+
+          // If armed, start audio NOW (unmute exactly on detection)
+          if (audioArmed && !audioLive) {
+            try {
+              videoColor.muted = false; videoColor.volume = 1.0;
+              await videoColor.play();
+              audioLive = true;
+              debug('Marker found — audio started');
+            } catch (e) {
+              // If browser still refuses, leave gate visible to try again
+              audioLive = false;
+              gate.hidden = false;
+              debug('Tap to enable audio');
+              console.warn('Unmute-on-detect error:', e);
+            }
+          }
         });
 
-        this.el.addEventListener('markerLost', function () {
-          if (!videoColor.paused) videoColor.pause();
-          if (!videoAlpha.paused) videoAlpha.pause();
+        this.el.addEventListener('markerLost', () => {
+          debug('Marker lost - maintaining stability');
+          
+          // Notify persistence component
+          const videoPlane = document.getElementById('videoPlane');
+          const persistent = videoPlane.components.persistent;
+          if (persistent) persistent.markerLost();
+          
+          // Keep videos playing briefly to avoid restart delays
+          setTimeout(() => {
+            audioLive = false;
+            videoColor.muted = true; videoColor.volume = 0;
+            if (!videoColor.paused) videoColor.pause();
+            if (!videoAlpha.paused) videoAlpha.pause();
+          }, 500); // Small delay to allow for quick re-detection
         });
+
+        // Show the gate for one clean gesture on any platform
+        gate.hidden = false;
       }
     });
   </script>
@@ -100,15 +245,14 @@
 <body style="margin: 0; overflow: hidden;">
   <div class="arjs-loader" id="loader"><div>Loading, please wait…</div></div>
 
-  <!-- iOS tap-to-start overlay -->
-  <div class="tap-overlay" id="tapOverlay">
+  <!-- One clear gesture to "arm" audio (no sound yet). Sound begins on marker detection. -->
+  <div class="gate" id="gate" hidden>
     <div>
-      <div>Tap to enable video & audio</div>
-      <button class="tap-btn" id="tapBtn">Enable</button>
+      <div>Tap once to arm audio. Sound will start when the image is detected.</div>
+      <button class="btn" id="enableBtn">Arm Audio</button>
     </div>
   </div>
-  <!-- Android sound chip -->
-  <div class="sound-chip" id="soundChip">🔊 Tap to enable sound</div>
+  <div class="debug" id="debug">Init…</div>
 
   <a-scene
     vr-mode-ui="enabled: false;"
@@ -118,7 +262,7 @@
     onloaded="document.getElementById('loader').style.display='none';"
   >
     <a-assets>
-      <!-- Keep playsinline for iOS; start muted; we unmute color on gesture -->
+      <!-- Keep muted; we unmute the color track exactly on markerFound -->
       <video
         id="videoColor"
         src="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/AR_Video02_Color.mp4"
@@ -142,7 +286,7 @@
       ></video>
     </a-assets>
 
-    <!-- Shader -->
+    <!-- Transparency matte shader -->
     <script id="matte-shader" type="x-shader/x-fragment">
       precision mediump float;
       uniform sampler2D videoColor;
@@ -172,22 +316,29 @@
       });
     </script>
 
-    <!-- Marker + plane -->
+    <!-- NFT marker with improved smoothing settings -->
     <a-nft
       videoplayer
       type="nft"
       url="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/marker/AR_Image-tracker_Crab"
       smooth="true"
-      smoothCount="10"
-      smoothTolerance="0.01"
-      smoothThreshold="5"
+      smoothCount="15"
+      smoothTolerance="0.02"
+      smoothThreshold="3"
+      detectionMode="mono_and_matrix"
+      matrixCodeType="3x3"
     >
-      <a-entity
+      <!-- Plane: auto-fit to color video aspect; enhanced stabilizer for smoothness -->
+      <a-entity id="videoPlane"
+        fit-video-plane="target: #videoColor; baseWidth: 300"
+        stabilize="positionFactor: 0.08; rotationFactor: 0.06; scaleFactor: 0.1; hideThreshold: 0.8; showThreshold: 0.2"
+        persistent="timeout: 1500; fadeOut: true"
         geometry="primitive: plane; width: 300; height: 150"
         material="shader: video-matte-shader;
                   videoColor: #videoColor;
                   videoAlpha: #videoAlpha;
-                  transparent: true;"
+                  transparent: true;
+                  alphaTest: 0.1;"
         position="0 0 0.1"
         rotation="-90 0 0"
       ></a-entity>
@@ -197,4 +348,3 @@
   </a-scene>
 </body>
 </html>
-
