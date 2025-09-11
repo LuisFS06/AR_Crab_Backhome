@@ -2,253 +2,132 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Back Home AR Experience - Enhanced Stability</title>
+  <title>Back Home AR — Fit to Marker Size</title>
 
   <script src="https://cdn.jsdelivr.net/gh/aframevr/aframe@1.6.0/dist/aframe-master.min.js"></script>
   <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar-nft.js"></script>
 
   <style>
-    body { margin: 0; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    .arjs-loader {
-      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-      background: rgba(0,0,0,0.85); color: #fff; z-index: 9999;
-    }
-    .gate {
-      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-      z-index: 10000; background: rgba(0,0,0,0.55); color: #fff; text-align: center; padding: 24px;
-    }
-    .gate[hidden] { display: none; }
-    .btn {
-      margin-top: 12px; background: #4caf50; color: #fff; border: 0; border-radius: 20px; padding: 10px 18px; font-weight: 700; cursor: pointer;
-    }
-    .debug { position: absolute; top: 8px; left: 8px; z-index: 10001; background: rgba(0,0,0,0.75); color:#fff; padding:6px 8px; border-radius:6px; font-size:12px; }
+    body{margin:0;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+    .loader,.gate{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:9999}
+    .loader{background:rgba(0,0,0,.85);color:#fff}
+    .gate{background:rgba(0,0,0,.55);color:#fff;z-index:10000}
+    .gate[hidden]{display:none}
+    .btn{margin-top:12px;background:#4caf50;color:#fff;border:0;border-radius:20px;padding:10px 18px;font-weight:700;cursor:pointer}
+    .debug{position:absolute;top:8px;left:8px;z-index:10001;background:rgba(0,0,0,.75);color:#fff;padding:6px 8px;border-radius:6px;font-size:12px}
   </style>
 
   <script>
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-    const isAndroid = /Android/i.test(navigator.userAgent);
+    const $ = sel => document.querySelector(sel);
 
-    // Auto-fit the plane to the color video aspect ratio
+    // Smooth position & rotation
+    AFRAME.registerComponent('smooth', {
+      schema:{pos:{default:0.18},rot:{default:0.18}},
+      init(){const o=this.el.object3D; this._p=o.position.clone(); this._q=o.quaternion.clone();},
+      tick(){const o=this.el.object3D; this._p.lerp(o.position,this.data.pos); o.position.copy(this._p);
+             this._q.slerp(o.quaternion,this.data.rot); o.quaternion.copy(this._q);}
+    });
+
+    // Fit plane to the physical width of the detected image (meters)
     AFRAME.registerComponent('fit-video-plane', {
-      schema: { target: {type: 'selector'}, baseWidth: {default: 300} },
-      init() {
-        const plane = this.el;
-        const video = this.data.target;
-        if (!video) return;
-        const setSize = () => {
-          const w = video.videoWidth || 16, h = video.videoHeight || 9;
-          const aspect = w / h;
-          plane.setAttribute('geometry', `primitive: plane; width: ${this.data.baseWidth}; height: ${this.data.baseWidth / aspect}`);
+      schema:{
+        target:{type:'selector'},     // #videoColor
+        markerWidth:{default:0.18},   // meters -> set this to your print width!
+        fitBy:{default:'width'},      // 'width' | 'height'
+        padding:{default:0.0}         // meters trimmed on each side
+      },
+      init(){
+        const plane=this.el, vid=this.data.target;
+        const apply=()=>{
+          const vw=vid.videoWidth||16, vh=vid.videoHeight||9, asp=vw/vh;
+          let width,height;
+          if(this.data.fitBy==='height'){
+            height=this.data.markerWidth - (this.data.padding*2);
+            width =height*asp;
+          }else{
+            width =this.data.markerWidth - (this.data.padding*2);
+            height=width/asp;
+          }
+          plane.setAttribute('geometry',`primitive: plane; width: ${width}; height: ${height}`);
         };
-        video.addEventListener('loadedmetadata', setSize);
-        if (video.readyState >= 1) setSize();
-      }
-    });
-
-    // Enhanced stabilizer with position, rotation, and scale smoothing
-    AFRAME.registerComponent('stabilize', {
-      schema: { 
-        positionFactor: {default: 0.1},
-        rotationFactor: {default: 0.08},
-        scaleFactor: {default: 0.12},
-        hideThreshold: {default: 0.5}, // seconds before hiding on lost tracking
-        showThreshold: {default: 0.1}   // seconds of stable tracking before showing
-      },
-      init() {
-        this.prevPosition = null;
-        this.prevRotation = null;
-        this.prevScale = null;
-        this.trackingLost = false;
-        this.lostTime = 0;
-        this.foundTime = 0;
-        this.isVisible = true;
-      },
-      tick(time, deltaTime) {
-        const obj = this.el.object3D;
-        const parent = this.el.parentNode;
-        
-        // Check if parent (marker) is visible
-        const markerVisible = parent && parent.object3D.visible;
-        
-        if (markerVisible) {
-          this.foundTime += deltaTime / 1000;
-          this.lostTime = 0;
-          
-          // Smooth position
-          if (!this.prevPosition) this.prevPosition = obj.position.clone();
-          this.prevPosition.lerp(obj.position, this.data.positionFactor);
-          obj.position.copy(this.prevPosition);
-          
-          // Smooth rotation
-          if (!this.prevRotation) this.prevRotation = obj.quaternion.clone();
-          this.prevRotation.slerp(obj.quaternion, this.data.rotationFactor);
-          obj.quaternion.copy(this.prevRotation);
-          
-          // Smooth scale
-          if (!this.prevScale) this.prevScale = obj.scale.clone();
-          this.prevScale.lerp(obj.scale, this.data.scaleFactor);
-          obj.scale.copy(this.prevScale);
-          
-          // Show object if stable for enough time
-          if (this.foundTime > this.data.showThreshold) {
-            if (!this.isVisible) {
-              this.el.object3D.visible = true;
-              this.isVisible = true;
-            }
-          }
-        } else {
-          this.lostTime += deltaTime / 1000;
-          this.foundTime = 0;
-          
-          // Hide object if tracking lost for too long
-          if (this.lostTime > this.data.hideThreshold && this.isVisible) {
-            this.el.object3D.visible = false;
-            this.isVisible = false;
-          }
+        if(vid){
+          vid.addEventListener('loadedmetadata',apply);
+          if(vid.readyState>=1) apply();
         }
       }
     });
 
-    // Persistence component to maintain object visibility during brief tracking losses
-    AFRAME.registerComponent('persistent', {
-      schema: {
-        timeout: {default: 1000}, // ms to keep visible after marker lost
-        fadeOut: {default: true}
+    // Audio gate + immediate unmute on detection + loss grace
+    AFRAME.registerComponent('ar-video', {
+      schema:{
+        plane:{type:'selector'},
+        confirmMs:{default:0},   // 0 = start audio immediately when found
+        lostMs:{default:900}
       },
-      init() {
-        this.visible = false;
-        this.timeout = null;
-        this.originalOpacity = 1;
-      },
-      markerFound() {
-        this.visible = true;
-        this.el.object3D.visible = true;
-        if (this.timeout) {
-          clearTimeout(this.timeout);
-          this.timeout = null;
-        }
-        // Restore full opacity
-        const material = this.el.getAttribute('material');
-        if (material) {
-          this.el.setAttribute('material', 'opacity', this.originalOpacity);
-        }
-      },
-      markerLost() {
-        if (this.data.timeout > 0) {
-          this.timeout = setTimeout(() => {
-            this.visible = false;
-            this.el.object3D.visible = false;
-          }, this.data.timeout);
-          
-          // Optional fade out effect
-          if (this.data.fadeOut) {
-            const material = this.el.getAttribute('material');
-            if (material) {
-              this.el.setAttribute('material', 'opacity', 0.3);
-            }
-          }
-        } else {
-          this.visible = false;
-          this.el.object3D.visible = false;
-        }
-      }
-    });
+      init(){
+        this.color=$('#videoColor'); this.alpha=$('#videoAlpha'); this.plane=this.data.plane;
+        this.gate=$('#gate'); this.btn=$('#enableBtn');
+        this.debug=msg=>{const d=$('#debug'); if(d) d.textContent=msg;};
 
-    // Play audio exactly on marker detection (after a single prior tap to "arm" audio)
-    AFRAME.registerComponent('videoplayer', {
-      init: function () {
-        const debug = (msg) => { const d = document.getElementById('debug'); if (d) d.textContent = msg; };
+        // Start muted to satisfy autoplay policies
+        [this.color,this.alpha].forEach(v=>{v.muted=true; v.volume=0; v.setAttribute('muted','');});
 
-        const videoColor = document.querySelector('#videoColor');
-        const videoAlpha = document.querySelector('#videoAlpha');
-        const gate = document.getElementById('gate');
-        const btn = document.getElementById('enableBtn');
+        // Prevent rare culling pops
+        this.plane.object3D.traverse(n=>n.frustumCulled=false);
 
-        // Start fully muted to satisfy autoplay rules
-        videoColor.setAttribute('muted', ''); videoColor.muted = true; videoColor.volume = 0;
-        videoAlpha.setAttribute('muted', ''); videoAlpha.muted = true; videoAlpha.volume = 0;
+        // Arm audio with one explicit tap (no sound yet)
+        this.armed=false; this.live=false; this.ct=null; this.lt=null;
+        this.btn.addEventListener('click', async ()=>{
+          try{
+            await Promise.allSettled([this.color.play(), this.alpha.play()]); // prime decoding muted
+            this.color.muted=true; this.color.volume=0;
+            this.armed=true; this.gate.hidden=true;
+            this.debug('Audio armed. Waiting for marker…');
+          }catch{ this.debug('Tap again to arm audio'); }
+        },{once:true});
+        this.gate.hidden=false;
 
-        let audioArmed = false;   // set to true after the ONE user gesture
-        let audioLive  = false;   // true while marker is found & color is unmuted
-
-        // One explicit gesture to "arm" audio (no sound yet)
-        const armAudio = async () => {
-          try {
-            // Prime decoding so unmute on detection is instant
-            await Promise.allSettled([ videoColor.play(), videoAlpha.play() ]);
-            // Keep muted until the marker is detected
-            videoColor.muted = true;  videoColor.volume = 0;
-            audioArmed = true;
-            gate.hidden = true;
-            debug('Audio armed. Waiting for marker…');
-          } catch (e) {
-            debug('Tap again to arm audio');
-            console.warn('Arming error:', e);
+        const startAudio = async ()=>{
+          if(this.armed && !this.live){
+            try{ this.color.muted=false; this.color.volume=1; await this.color.play(); this.live=true; this.debug('Audio ON'); }
+            catch(e){ this.live=false; this.gate.hidden=false; this.debug('Tap to enable audio'); }
           }
         };
-        btn.addEventListener('click', armAudio, { once: true });
 
-        // Marker events with enhanced stability handling
-        this.el.addEventListener('markerFound', async () => {
-          debug('Marker found');
-          
-          // Notify persistence component
-          const videoPlane = document.getElementById('videoPlane');
-          const persistent = videoPlane.components.persistent;
-          if (persistent) persistent.markerFound();
-          
-          // Make sure frames are flowing
-          if (videoColor.paused) videoColor.play().catch(()=>{});
-          if (videoAlpha.paused) videoAlpha.play().catch(()=>{});
-
-          // If armed, start audio NOW (unmute exactly on detection)
-          if (audioArmed && !audioLive) {
-            try {
-              videoColor.muted = false; videoColor.volume = 1.0;
-              await videoColor.play();
-              audioLive = true;
-              debug('Marker found — audio started');
-            } catch (e) {
-              // If browser still refuses, leave gate visible to try again
-              audioLive = false;
-              gate.hidden = false;
-              debug('Tap to enable audio');
-              console.warn('Unmute-on-detect error:', e);
-            }
-          }
+        // Marker events
+        this.el.addEventListener('markerFound', ()=>{
+          this.debug('Marker found');
+          if(this.lt){clearTimeout(this.lt); this.lt=null;}
+          if(this.color.paused) this.color.play().catch(()=>{});
+          if(this.alpha.paused) this.alpha.play().catch(()=>{});
+          if(this.ct){clearTimeout(this.ct); this.ct=null;}
+          if(this.data.confirmMs<=0){ startAudio(); }
+          else { this.ct=setTimeout(startAudio,this.data.confirmMs); }
         });
 
-        this.el.addEventListener('markerLost', () => {
-          debug('Marker lost - maintaining stability');
-          
-          // Notify persistence component
-          const videoPlane = document.getElementById('videoPlane');
-          const persistent = videoPlane.components.persistent;
-          if (persistent) persistent.markerLost();
-          
-          // Keep videos playing briefly to avoid restart delays
-          setTimeout(() => {
-            audioLive = false;
-            videoColor.muted = true; videoColor.volume = 0;
-            if (!videoColor.paused) videoColor.pause();
-            if (!videoAlpha.paused) videoAlpha.pause();
-          }, 500); // Small delay to allow for quick re-detection
+        this.el.addEventListener('markerLost', ()=>{
+          this.debug('Marker lost (grace…)');
+          if(this.ct){clearTimeout(this.ct); this.ct=null;}
+          if(this.lt) clearTimeout(this.lt);
+          this.lt=setTimeout(()=>{
+            this.live=false; this.color.muted=true; this.color.volume=0;
+            if(!this.color.paused) this.color.pause();
+            if(!this.alpha.paused) this.alpha.pause();
+            this.debug('Paused after grace');
+          }, this.data.lostMs);
         });
-
-        // Show the gate for one clean gesture on any platform
-        gate.hidden = false;
       }
     });
   </script>
 </head>
 
-<body style="margin: 0; overflow: hidden;">
-  <div class="arjs-loader" id="loader"><div>Loading, please wait…</div></div>
+<body>
+  <div class="loader" id="loader"><div>Loading, please wait…</div></div>
 
-  <!-- One clear gesture to "arm" audio (no sound yet). Sound begins on marker detection. -->
+  <!-- One tap to ARM audio; sound starts when the marker is detected -->
   <div class="gate" id="gate" hidden>
     <div>
-      <div>Tap once to arm audio. Sound will start when the image is detected.</div>
+      <div>Tap once to arm audio. Sound starts on detection.</div>
       <button class="btn" id="enableBtn">Arm Audio</button>
     </div>
   </div>
@@ -256,95 +135,63 @@
 
   <a-scene
     vr-mode-ui="enabled: false;"
-    renderer="logarithmicDepthBuffer: true; precision: medium;"
+    renderer="antialias: true; logarithmicDepthBuffer: true; precision: high;"
     embedded
-    arjs="sourceType: webcam; trackingMethod: best; debugUIEnabled: false;"
-    onloaded="document.getElementById('loader').style.display='none';"
+    arjs="sourceType: webcam; trackingMethod: best; debugUIEnabled: false;
+          maxDetectionRate: 60; canvasWidth: 1280; canvasHeight: 960;"
   >
-    <a-assets>
-      <!-- Keep muted; we unmute the color track exactly on markerFound -->
-      <video
-        id="videoColor"
-        src="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/AR_Video02_Color.mp4"
-        preload="metadata"
-        loop
-        muted
-        crossorigin="anonymous"
-        webkit-playsinline
-        playsinline
-      ></video>
-
-      <video
-        id="videoAlpha"
-        src="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/AR_Video02_Alpha.mp4"
-        preload="metadata"
-        loop
-        muted
-        crossorigin="anonymous"
-        webkit-playsinline
-        playsinline
-      ></video>
+    <a-assets timeout="3000">
+      <video id="videoColor" src="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/AR_Video02_Color.mp4"
+             preload="metadata" loop muted crossorigin="anonymous" webkit-playsinline playsinline></video>
+      <video id="videoAlpha" src="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/AR_Video02_Alpha.mp4"
+             preload="metadata" loop muted crossorigin="anonymous" webkit-playsinline playsinline></video>
     </a-assets>
 
-    <!-- Transparency matte shader -->
+    <!-- Matte shader -->
     <script id="matte-shader" type="x-shader/x-fragment">
       precision mediump float;
-      uniform sampler2D videoColor;
-      uniform sampler2D videoAlpha;
-      varying vec2 vUV;
-      void main() {
-        vec4 color = texture2D(videoColor, vUV);
-        vec4 alpha = texture2D(videoAlpha, vUV);
-        gl_FragColor = vec4(color.rgb, alpha.r);
-      }
+      uniform sampler2D videoColor; uniform sampler2D videoAlpha; varying vec2 vUV;
+      void main(){ vec4 c=texture2D(videoColor,vUV); vec4 a=texture2D(videoAlpha,vUV);
+                   gl_FragColor=vec4(c.rgb,a.r); }
     </script>
-
     <script>
-      AFRAME.registerShader('video-matte-shader', {
-        schema: {
-          videoColor: { type: 'map', is: 'uniform' },
-          videoAlpha: { type: 'map', is: 'uniform' }
-        },
-        fragmentShader: document.getElementById('matte-shader').textContent,
-        vertexShader: `
-          varying vec2 vUV;
-          void main() {
-            vUV = uv;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-          }
-        `
+      AFRAME.registerShader('video-matte-shader',{
+        schema:{videoColor:{type:'map',is:'uniform'},videoAlpha:{type:'map',is:'uniform'}},
+        fragmentShader:document.getElementById('matte-shader').textContent,
+        vertexShader:'varying vec2 vUV; void main(){ vUV=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }'
       });
     </script>
 
-    <!-- NFT marker with improved smoothing settings -->
+    <!-- IMPORTANT: url points to the NFT dataset ROOT (no extension) -->
     <a-nft
-      videoplayer
+      ar-video="plane:#videoPlane; confirmMs:0; lostMs:900"
       type="nft"
       url="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/marker/AR_Image-tracker_Crab"
-      smooth="true"
-      smoothCount="15"
-      smoothTolerance="0.02"
-      smoothThreshold="3"
-      detectionMode="mono_and_matrix"
-      matrixCodeType="3x3"
+      smooth="true" smoothCount="30" smoothTolerance="0.01" smoothThreshold="10"
     >
-      <!-- Plane: auto-fit to color video aspect; enhanced stabilizer for smoothness -->
+      <!-- Set markerWidth to your printed image width (meters). Example: 0.18 = 18 cm -->
       <a-entity id="videoPlane"
-        fit-video-plane="target: #videoColor; baseWidth: 300"
-        stabilize="positionFactor: 0.08; rotationFactor: 0.06; scaleFactor: 0.1; hideThreshold: 0.8; showThreshold: 0.2"
-        persistent="timeout: 1500; fadeOut: true"
-        geometry="primitive: plane; width: 300; height: 150"
-        material="shader: video-matte-shader;
-                  videoColor: #videoColor;
-                  videoAlpha: #videoAlpha;
-                  transparent: true;
-                  alphaTest: 0.1;"
-        position="0 0 0.1"
-        rotation="-90 0 0"
-      ></a-entity>
+        smooth="pos:0.18; rot:0.18"
+        fit-video-plane="target:#videoColor; markerWidth:0.18; fitBy:width; padding:0.003"
+        geometry="primitive: plane; width: 0.18; height: 0.1"  <!-- will be overridden by fit-video-plane -->
+        material="shader: video-matte-shader; videoColor:#videoColor; videoAlpha:#videoAlpha; transparent:true; alphaTest:0.1;"
+        position="0 0 0.005" rotation="-90 0 0">
+      </a-entity>
     </a-nft>
 
     <a-entity camera look-controls position="0 1.6 0"></a-entity>
   </a-scene>
+
+  <!-- Robust, tiny loader hider -->
+  <script>
+    document.addEventListener('DOMContentLoaded', ()=>{
+      const loader=$('#loader'), scene=$('a-scene');
+      const hide=()=>{ if(loader) loader.style.display='none'; };
+      ['loaded','renderstart','arReady','camera-init'].forEach(ev=>scene.addEventListener(ev,hide));
+      window.addEventListener('arjs-video-loaded', hide);
+      scene.addEventListener('markerFound', hide);
+      setTimeout(hide, 7000);
+    });
+  </script>
 </body>
 </html>
