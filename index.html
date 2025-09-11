@@ -132,124 +132,6 @@
         });
       }
     });
-
-    // Enhanced stability component
-    AFRAME.registerComponent('stability-enhancer', {
-      init: function () {
-        this.lastValidPosition = new THREE.Vector3();
-        this.lastValidRotation = new THREE.Euler();
-        this.lastValidScale = new THREE.Vector3(1, 1, 1);
-        this.positionSmoothing = 0.15;
-        this.rotationSmoothing = 0.2;
-        this.isFirstFrame = true;
-        
-        // Store initial transform
-        this.el.addEventListener('markerFound', () => {
-          this.isFirstFrame = true;
-        });
-      },
-
-      tick: function () {
-        if (!this.el.object3D.visible) return;
-
-        const currentPos = this.el.object3D.position;
-        const currentRot = this.el.object3D.rotation;
-        const currentScale = this.el.object3D.scale;
-
-        if (this.isFirstFrame) {
-          this.lastValidPosition.copy(currentPos);
-          this.lastValidRotation.copy(currentRot);
-          this.lastValidScale.copy(currentScale);
-          this.isFirstFrame = false;
-          return;
-        }
-
-        // Smooth position
-        this.lastValidPosition.lerp(currentPos, this.positionSmoothing);
-        currentPos.copy(this.lastValidPosition);
-
-        // Smooth rotation
-        this.lastValidRotation.x += (currentRot.x - this.lastValidRotation.x) * this.rotationSmoothing;
-        this.lastValidRotation.y += (currentRot.y - this.lastValidRotation.y) * this.rotationSmoothing;
-        this.lastValidRotation.z += (currentRot.z - this.lastValidRotation.z) * this.rotationSmoothing;
-        currentRot.copy(this.lastValidRotation);
-      }
-    });
-
-    // Auto-sizing component with better video dimension detection
-    AFRAME.registerComponent('auto-size-to-marker', {
-      schema: {
-        colorVideo: { type: 'selector' },   
-        alphaVideo: { type: 'selector' },   
-        baseWidth: { type: 'number', default: 1 }, 
-        fit: { type: 'string', default: 'contain' }
-      },
-      
-      init: function () {
-        this.applied = false;
-        this.retryCount = 0;
-        this.maxRetries = 15;
-        
-        // Wait for video to be ready
-        setTimeout(() => this.checkAndApply(), 200);
-      },
-
-      checkAndApply: function() {
-        if (this.applied || this.retryCount >= this.maxRetries) return;
-        
-        const el = this.el;
-        const colorVid = this.data.colorVideo;
-        
-        if (!colorVid) {
-          console.warn('Color video element not found');
-          return;
-        }
-
-        const applySize = () => {
-          if (this.applied) return;
-          
-          let vw = colorVid.videoWidth || colorVid.naturalWidth;
-          let vh = colorVid.videoHeight || colorVid.naturalHeight;
-          
-          if (!vw || !vh) {
-            this.retryCount++;
-            if (this.retryCount < this.maxRetries) {
-              setTimeout(() => this.checkAndApply(), 300);
-            }
-            return;
-          }
-
-          const videoAR = vw / vh;
-          let width = this.data.baseWidth;
-          let height = width / videoAR;
-
-          if (this.data.fit === 'cover') {
-            height = this.data.baseWidth;      
-            width = height * videoAR;
-          }
-
-          el.setAttribute('geometry', {
-            primitive: 'plane',
-            width: width,
-            height: height
-          });
-          
-          this.applied = true;
-          console.log(`Auto-size applied: ${width.toFixed(2)} x ${height.toFixed(2)} (video: ${vw}x${vh})`);
-        };
-
-        // Multiple detection methods
-        if (colorVid.readyState >= 1) {
-          applySize();
-        } else {
-          colorVid.addEventListener('loadedmetadata', applySize, { once: true });
-          colorVid.addEventListener('canplay', applySize, { once: true });
-        }
-        
-        // Fallback retry
-        setTimeout(applySize, 1000);
-      }
-    });
   </script>
 </head>
 
@@ -271,25 +153,17 @@
 
   <a-scene
     vr-mode-ui="enabled: false;"
-    renderer="logarithmicDepthBuffer: true; precision: medium; antialias: true; alpha: true;"
+    renderer="logarithmicDepthBuffer: true; precision: medium; antialias: true;"
     embedded
-    arjs="sourceType: webcam; 
-          trackingMethod: best; 
-          debugUIEnabled: false; 
-          detectionMode: mono_and_matrix; 
-          matrixCodeType: 3x3;
-          cameraParametersUrl: https://raw.githack.com/AR-js-org/AR.js/master/data/data/camera_para.dat;
-          maxDetectionRate: 60;
-          canvasWidth: 640;
-          canvasHeight: 480;"
+    arjs="sourceType: webcam; trackingMethod: best; debugUIEnabled: false; detectionMode: mono_and_matrix; matrixCodeType: 3x3;"
     onloaded="document.getElementById('loader').style.display='none';"
   >
     <a-assets>
-      <!-- Videos with enhanced loading -->
+      <!-- Videos start muted and paused -->
       <video
         id="videoColor"
         src="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/AR_Video02_Color.mp4"
-        preload="auto"
+        preload="metadata"
         loop
         muted
         crossorigin="anonymous"
@@ -300,7 +174,7 @@
       <video
         id="videoAlpha"
         src="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/AR_Video02_Alpha.mp4"
-        preload="auto"
+        preload="metadata"
         loop
         muted
         crossorigin="anonymous"
@@ -319,10 +193,13 @@
       void main() {
         vec4 color = texture2D(videoColor, vUV);
         vec4 alpha = texture2D(videoAlpha, vUV);
+        // Enhance alpha channel processing for better transparency
         float alphaValue = alpha.r * opacity;
         gl_FragColor = vec4(color.rgb, alphaValue);
       }
     </script>
+
+
 
     <script>
       AFRAME.registerShader('enhanced-video-matte-shader', {
@@ -343,42 +220,34 @@
       });
     </script>
 
-    <!-- Enhanced NFT marker with maximum stability settings -->
     <a-nft
       adaptive-videoplayer="volume: 0.8" 
-      stability-enhancer
       type="nft"
       url="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/marker/AR_Image-tracker_Crab"
       smooth="true"
-      smoothCount="20"
-      smoothTolerance="0.001"
-      smoothThreshold="2"
-      raycaster="objects: .clickable"
+      smoothCount="15"
+      smoothTolerance="0.005"
+      smoothThreshold="3"
     >
       <a-entity
         id="videoPlane"
-        geometry="primitive: plane; width: 1; height: 0.6"
+        geometry="primitive: plane; width: 300; height: 150"
         auto-size-to-marker="colorVideo: #videoColor; alphaVideo: #videoAlpha; baseWidth: 1; fit: contain"
         material="shader: enhanced-video-matte-shader;
                   videoColor: #videoColor;
                   videoAlpha: #videoAlpha;
                   opacity: 1.0;
                   transparent: true;
-                  alphaTest: 0.1;
-                  side: double;"
+                  alphaTest: 0.1;"
         position="0 0 0.1"
         rotation="-90 0 0"
       ></a-entity>
     </a-nft>
 
-    <!-- Enhanced camera with better settings -->
+    <!-- Enhanced camera with stabilization -->
     <a-entity 
       camera 
-      look-controls="enabled: true; 
-                    reverseMouseDrag: true; 
-                    touchEnabled: true; 
-                    magicWindowTrackingEnabled: true;
-                    pointerLockEnabled: false;"
+      look-controls="enabled: true; reverseMouseDrag: true; touchEnabled: true; magicWindowTrackingEnabled: true"
       wasd-controls="enabled: false"
       position="0 1.6 0"
     ></a-entity>
