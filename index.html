@@ -2,14 +2,14 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Back Home AR Experience</title>
+  <title>Back Home AR Experience — Stable</title>
 
   <script src="https://cdn.jsdelivr.net/gh/aframevr/aframe@1.6.0/dist/aframe-master.min.js"></script>
   <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar-nft.js"></script>
 
   <style>
     body { margin: 0; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    .arjs-loader {
+    .loader {
       position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
       background: rgba(0,0,0,0.85); color: #fff; z-index: 9999;
     }
@@ -18,17 +18,28 @@
       z-index: 10000; background: rgba(0,0,0,0.55); color: #fff; text-align: center; padding: 24px;
     }
     .gate[hidden] { display: none; }
-    .btn {
-      margin-top: 12px; background: #4caf50; color: #fff; border: 0; border-radius: 20px; padding: 10px 18px; font-weight: 700; cursor: pointer;
-    }
+    .btn { margin-top: 12px; background: #4caf50; color: #fff; border: 0; border-radius: 20px; padding: 10px 18px; font-weight: 700; cursor: pointer; }
     .debug { position: absolute; top: 8px; left: 8px; z-index: 10001; background: rgba(0,0,0,0.75); color:#fff; padding:6px 8px; border-radius:6px; font-size:12px; }
   </style>
 
   <script>
+    // Platform flags (if you need them later)
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
     const isAndroid = /Android/i.test(navigator.userAgent);
 
-    // Auto-fit the plane to the color video aspect ratio
+    // No frustum culling (keep the plane rendered even if bounding box jitters)
+    AFRAME.registerComponent('no-frustum-cull', {
+      init() {
+        this.el.addEventListener('object3dset', () => {
+          const obj = this.el.getObject3D('mesh') || this.el.object3D;
+          if (obj) obj.traverse(n => n.frustumCulled = false);
+        });
+        const obj = this.el.getObject3D('mesh') || this.el.object3D;
+        if (obj) obj.traverse(n => n.frustumCulled = false);
+      }
+    });
+
+    // Auto-fit plane to color video aspect
     AFRAME.registerComponent('fit-video-plane', {
       schema: { target: {type: 'selector'}, baseWidth: {default: 300} },
       init() {
@@ -45,98 +56,149 @@
       }
     });
 
-    // Gentle content stabilizer
-    AFRAME.registerComponent('stabilize', {
-      schema: { factor: {default: 0.15} },
+    // Pose smoother (position + rotation). Runs on the content (child of a-nft)
+    AFRAME.registerComponent('pose-smoother', {
+      schema: { pos: {default: 0.18}, rot: {default: 0.18} }, // 0..1 (higher = faster)
+      init() {
+        const o = this.el.object3D;
+        this._p = o.position.clone();
+        this._q = o.quaternion.clone();
+      },
       tick() {
-        const p = this.el.object3D.position;
-        if (!this.prev) this.prev = p.clone();
-        this.prev.lerp(p, this.data.factor);
-        this.el.object3D.position.copy(this.prev);
+        const o = this.el.object3D;
+        // Lerp position
+        this._p.lerp(o.position, this.data.pos);
+        o.position.copy(this._p);
+        // Slerp rotation
+        this._q.slerp(o.quaternion, this.data.rot);
+        o.quaternion.copy(this._q);
       }
     });
 
-    // Play audio exactly on marker detection (after a single prior tap to "arm" audio)
-    AFRAME.registerComponent('videoplayer', {
-      init: function () {
-        const debug = (msg) => { const d = document.getElementById('debug'); if (d) d.textContent = msg; };
+    // Stable videoplayer with FOUND/LOST hysteresis + confirm window
+    AFRAME.registerComponent('stable-videoplayer', {
+      schema: {
+        confirmMs: {default: 180},   // Require this much time of "found" before we declare locked
+        lostGraceMs: {default: 900}  // Keep showing/playing for this time after 'markerLost'
+      },
+      init() {
+        const debug = (m) => { const d = document.getElementById('debug'); if (d) d.textContent = m; };
 
         const videoColor = document.querySelector('#videoColor');
         const videoAlpha = document.querySelector('#videoAlpha');
         const gate = document.getElementById('gate');
         const btn = document.getElementById('enableBtn');
 
-        // Start fully muted to satisfy autoplay rules
+        // Start fully muted so we can prime decoding; audio is armed by user
         videoColor.setAttribute('muted', ''); videoColor.muted = true; videoColor.volume = 0;
         videoAlpha.setAttribute('muted', ''); videoAlpha.muted = true; videoAlpha.volume = 0;
 
-        let audioArmed = false;   // set to true after the ONE user gesture
-        let audioLive  = false;   // true while marker is found & color is unmuted
+        let audioArmed = false;   // set by one user tap
+        let locked = false;       // we consider tracking solid (after confirmMs)
+        let lostTimer = null;     // hysteresis timer after markerLost
+        let confirmTimer = null;  // confirmation window after markerFound
 
-        // One explicit gesture to "arm" audio (no sound yet)
         const armAudio = async () => {
           try {
-            // Prime decoding so unmute on detection is instant
+            // Prime both videos (muted) so unmute is instant when locked
             await Promise.allSettled([ videoColor.play(), videoAlpha.play() ]);
-            // Keep muted until the marker is detected
-            videoColor.muted = true;  videoColor.volume = 0;
+            videoColor.muted = true; videoColor.volume = 0;
             audioArmed = true;
             gate.hidden = true;
-            debug('Audio armed. Waiting for marker…');
-          } catch (e) {
+            debug('Audio armed. Waiting for stable lock…');
+          } catch(e) {
             debug('Tap again to arm audio');
             console.warn('Arming error:', e);
           }
         };
         btn.addEventListener('click', armAudio, { once: true });
 
-        // Marker events
-        this.el.addEventListener('markerFound', async () => {
-          debug('Marker found');
-          // Make sure frames are flowing
+        const onStableLock = async () => {
+          if (!audioArmed || !videoColor) return;
+          try {
+            videoColor.muted = false; videoColor.volume = 1.0;
+            await videoColor.play();
+            debug('Stable lock — audio ON');
+          } catch(e) {
+            debug('Tap to enable audio');
+            gate.hidden = false;
+            console.warn('Unmute error:', e);
+          }
+        };
+
+        // --- Marker events with hysteresis ---
+        this.el.addEventListener('markerFound', () => {
+          debug('Marker found (confirming…)');
+          // cancel any pending "lost"
+          if (lostTimer) { clearTimeout(lostTimer); lostTimer = null; }
+
+          // Ensure frames are flowing (muted)
           if (videoColor.paused) videoColor.play().catch(()=>{});
           if (videoAlpha.paused) videoAlpha.play().catch(()=>{});
 
-          // If armed, start audio NOW (unmute exactly on detection)
-          if (audioArmed && !audioLive) {
-            try {
-              videoColor.muted = false; videoColor.volume = 1.0;
-              await videoColor.play();
-              audioLive = true;
-              debug('Marker found — audio started');
-            } catch (e) {
-              // If browser still refuses, leave gate visible to try again
-              audioLive = false;
-              gate.hidden = false;
-              debug('Tap to enable audio');
-              console.warn('Unmute-on-detect error:', e);
+          // Start (or restart) a short confirmation timer; only after it elapses we "lock"
+          if (confirmTimer) clearTimeout(confirmTimer);
+          confirmTimer = setTimeout(() => {
+            if (!locked) {
+              locked = true;
+              onStableLock();
             }
-          }
+          }, this.data.confirmMs);
         });
 
         this.el.addEventListener('markerLost', () => {
-          debug('Marker lost');
-          // Stop everything and re-mute so the next detection starts fresh
-          audioLive = false;
-          videoColor.muted = true; videoColor.volume = 0;
-          if (!videoColor.paused) videoColor.pause();
-          if (!videoAlpha.paused) videoAlpha.pause();
+          debug('Marker lost (grace period…)');
+          // If we were in confirmation, cancel it
+          if (confirmTimer) { clearTimeout(confirmTimer); confirmTimer = null; }
+
+          // Start grace timer; if we refind within grace, nothing happens
+          if (lostTimer) clearTimeout(lostTimer);
+          lostTimer = setTimeout(() => {
+            // After grace expires, consider fully lost
+            locked = false;
+            // Stop & remute so next stable lock restarts cleanly
+            videoColor.muted = true; videoColor.volume = 0;
+            if (!videoColor.paused) videoColor.pause();
+            if (!videoAlpha.paused) videoAlpha.pause();
+            debug('Lost after grace — audio OFF, paused');
+          }, this.data.lostGraceMs);
         });
 
-        // Show the gate for one clean gesture on any platform
+        // Show the arm gate once (required for iOS/Android audio policies)
         gate.hidden = false;
       }
+    });
+
+    // Loader hide (robust): listen to several events + a timeout
+    document.addEventListener('DOMContentLoaded', () => {
+      const loader = document.getElementById('loader');
+      const scene  = document.querySelector('a-scene');
+      if (!loader || !scene) return;
+
+      const hide = (why) => {
+        if (loader.style.display === 'none') return;
+        loader.style.display = 'none';
+        console.log('Hide loader:', why);
+      };
+
+      scene.addEventListener('loaded',       () => hide('scene loaded'));
+      scene.addEventListener('renderstart',  () => hide('renderstart'));
+      scene.addEventListener('arReady',      () => hide('arReady'));
+      scene.addEventListener('camera-init',  () => hide('camera-init'));
+      window.addEventListener('arjs-video-loaded', () => hide('arjs-video-loaded'));
+      scene.addEventListener('markerFound',  () => hide('markerFound'));
+      setTimeout(() => hide('timeout fallback'), 7000);
     });
   </script>
 </head>
 
 <body style="margin: 0; overflow: hidden;">
-  <div class="arjs-loader" id="loader"><div>Loading, please wait…</div></div>
+  <div class="loader" id="loader"><div>Loading, please wait…</div></div>
 
-  <!-- One clear gesture to "arm" audio (no sound yet). Sound begins on marker detection. -->
+  <!-- One explicit gesture to arm audio (no sound yet). Sound begins on stable lock. -->
   <div class="gate" id="gate" hidden>
     <div>
-      <div>Tap once to arm audio. Sound will start when the image is detected.</div>
+      <div>Tap once to arm audio. Sound will start when the image is stably detected.</div>
       <button class="btn" id="enableBtn">Arm Audio</button>
     </div>
   </div>
@@ -144,13 +206,12 @@
 
   <a-scene
     vr-mode-ui="enabled: false;"
-    renderer="logarithmicDepthBuffer: true; precision: medium;"
+    renderer="antialias: true; logarithmicDepthBuffer: true; precision: high;"
     embedded
-    arjs="sourceType: webcam; trackingMethod: best; debugUIEnabled: false;"
-    onloaded="document.getElementById('loader').style.display='none';"
+    arjs="sourceType: webcam; trackingMethod: best; debugUIEnabled: false; maxDetectionRate: 60; canvasWidth: 1280; canvasHeight: 960;"
   >
-    <a-assets>
-      <!-- Keep muted; we unmute the color track exactly on markerFound -->
+    <a-assets timeout="3000">
+      <!-- Keep muted; audio is armed and starts only on stable marker -->
       <video
         id="videoColor"
         src="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/AR_Video02_Color.mp4"
@@ -204,20 +265,20 @@
       });
     </script>
 
-    <!-- NFT marker with smoothing to reduce jitter -->
+    <!-- IMPORTANT: url points to the NFT dataset ROOT (no extension) -->
     <a-nft
-      videoplayer
+      stable-videoplayer="confirmMs: 180; lostGraceMs: 900"
       type="nft"
-      url="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/marker/AR_Image-tracker_Crab"
+      url="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/AR_Image-tracker_Crab"
       smooth="true"
-      smoothCount="10"
+      smoothCount="30"
       smoothTolerance="0.01"
-      smoothThreshold="5"
+      smoothThreshold="10"
     >
-      <!-- Plane: auto-fit to color video aspect; light stabilizer for extra smoothness -->
       <a-entity id="videoPlane"
+        no-frustum-cull
         fit-video-plane="target: #videoColor; baseWidth: 300"
-        stabilize="factor: 0.15"
+        pose-smoother="pos: 0.18; rot: 0.18"
         geometry="primitive: plane; width: 300; height: 150"
         material="shader: video-matte-shader;
                   videoColor: #videoColor;
