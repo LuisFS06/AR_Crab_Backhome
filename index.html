@@ -200,6 +200,50 @@
     </script>
 
     <script>
+     
+      AFRAME.registerComponent('auto-size-to-marker', {
+        schema: {
+          colorVideo: { type: 'selector' },   
+          alphaVideo: { type: 'selector' },   
+          baseWidth:  { type: 'number', default: 1 }, 
+          fit:        { type: 'string', default: 'contain' }
+        },
+        init: function () {
+          const el = this.el;
+          const colorVid = this.data.colorVideo;
+          const alphaVid = this.data.alphaVideo || null;
+    
+          const applySize = () => {
+            const vw = colorVid.videoWidth || 0;
+            const vh = colorVid.videoHeight || 0;
+            if (!vw || !vh) return;
+    
+            const videoAR = vw / vh;
+            let width = this.data.baseWidth;
+            let height = width / videoAR;
+    
+            if (this.data.fit === 'cover') {
+              height = this.data.baseWidth;      
+              width = height * videoAR;
+            }
+    
+            el.setAttribute('geometry', {
+              primitive: 'plane',
+              width: width,
+              height: height
+            });
+          };
+    
+          applySize();
+    
+          const onMeta = () => applySize();
+          colorVid.addEventListener('loadedmetadata', onMeta, { once: true });
+          if (alphaVid) alphaVid.addEventListener('loadedmetadata', onMeta, { once: true });
+        }
+      });
+    </script>    
+
+    <script>
       AFRAME.registerShader('enhanced-video-matte-shader', {
         schema: {
           videoColor: { type: 'map', is: 'uniform' },
@@ -218,9 +262,8 @@
       });
     </script>
 
-    <!-- Enhanced marker with stability improvements -->
     <a-nft
-      adaptive-videoplayer="width: 300; height: 150; volume: 0.8"
+      adaptive-videoplayer="volume: 0.8" 
       type="nft"
       url="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/marker/AR_Image-tracker_Crab"
       smooth="true"
@@ -229,7 +272,8 @@
       smoothThreshold="3"
     >
       <a-entity
-        geometry="primitive: plane; width: 300; height: 150"
+        id="videoPlane"
+        auto-size-to-marker="colorVideo: #videoColor; alphaVideo: #videoAlpha; baseWidth: 1; fit: contain"
         material="shader: enhanced-video-matte-shader;
                   videoColor: #videoColor;
                   videoAlpha: #videoAlpha;
