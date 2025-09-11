@@ -25,11 +25,10 @@
   </style>
 
   <script>
-    // --- Utilities ---
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
     const isAndroid = /Android/i.test(navigator.userAgent);
 
-    // Fit plane geometry to match color video aspect ratio
+    // Auto-fit the plane to the color video aspect ratio
     AFRAME.registerComponent('fit-video-plane', {
       schema: { target: {type: 'selector'}, baseWidth: {default: 300} },
       init() {
@@ -46,12 +45,10 @@
       }
     });
 
-    // Gentle position stabilizer (lerp) on the plane (content) itself
+    // Gentle content stabilizer
     AFRAME.registerComponent('stabilize', {
       schema: { factor: {default: 0.15} },
       tick() {
-        // lerp current position toward its instantaneous position set by AR.js (already pretty stable)
-        // Here we just smooth minor jitter produced by pose solve updates
         const p = this.el.object3D.position;
         if (!this.prev) this.prev = p.clone();
         this.prev.lerp(p, this.data.factor);
@@ -59,60 +56,74 @@
       }
     });
 
-    // Strict audio gate videoplayer
+    // Play audio exactly on marker detection (after a single prior tap to "arm" audio)
     AFRAME.registerComponent('videoplayer', {
       init: function () {
-        const debug = (msg) => {
-          const d = document.getElementById('debug');
-          if (d) d.textContent = msg;
-        };
+        const debug = (msg) => { const d = document.getElementById('debug'); if (d) d.textContent = msg; };
 
         const videoColor = document.querySelector('#videoColor');
         const videoAlpha = document.querySelector('#videoAlpha');
         const gate = document.getElementById('gate');
         const btn = document.getElementById('enableBtn');
 
-        // Ensure muted from the start (attribute + property)
+        // Start fully muted to satisfy autoplay rules
         videoColor.setAttribute('muted', ''); videoColor.muted = true; videoColor.volume = 0;
         videoAlpha.setAttribute('muted', ''); videoAlpha.muted = true; videoAlpha.volume = 0;
 
-        let audioUnlocked = false;
+        let audioArmed = false;   // set to true after the ONE user gesture
+        let audioLive  = false;   // true while marker is found & color is unmuted
 
-        const unlockAudio = async () => {
+        // One explicit gesture to "arm" audio (no sound yet)
+        const armAudio = async () => {
           try {
-            // Make sure both videos are running (muted) first
+            // Prime decoding so unmute on detection is instant
             await Promise.allSettled([ videoColor.play(), videoAlpha.play() ]);
-            // Now explicitly unmute only the color track and raise volume
-            videoColor.muted = false; videoColor.volume = 1.0;
-            await videoColor.play();
-            audioUnlocked = true;
+            // Keep muted until the marker is detected
+            videoColor.muted = true;  videoColor.volume = 0;
+            audioArmed = true;
             gate.hidden = true;
-            debug('Audio enabled');
+            debug('Audio armed. Waiting for marker…');
           } catch (e) {
-            // If this fails, keep gate visible so user can try again
-            debug('Enable failed, tap again');
-            console.warn('Audio unlock error:', e);
+            debug('Tap again to arm audio');
+            console.warn('Arming error:', e);
           }
         };
+        btn.addEventListener('click', armAudio, { once: true });
 
-        // One explicit gesture only (no global touch listeners to avoid accidental triggers)
-        btn.addEventListener('click', unlockAudio, { once: true });
-
-        // Marker events: always play frames (muted) for visuals; sound only after unlock
-        this.el.addEventListener('markerFound', function () {
-          // Start both (still muted until user taps)
+        // Marker events
+        this.el.addEventListener('markerFound', async () => {
+          debug('Marker found');
+          // Make sure frames are flowing
           if (videoColor.paused) videoColor.play().catch(()=>{});
           if (videoAlpha.paused) videoAlpha.play().catch(()=>{});
-          debug('Marker found');
+
+          // If armed, start audio NOW (unmute exactly on detection)
+          if (audioArmed && !audioLive) {
+            try {
+              videoColor.muted = false; videoColor.volume = 1.0;
+              await videoColor.play();
+              audioLive = true;
+              debug('Marker found — audio started');
+            } catch (e) {
+              // If browser still refuses, leave gate visible to try again
+              audioLive = false;
+              gate.hidden = false;
+              debug('Tap to enable audio');
+              console.warn('Unmute-on-detect error:', e);
+            }
+          }
         });
 
-        this.el.addEventListener('markerLost', function () {
+        this.el.addEventListener('markerLost', () => {
+          debug('Marker lost');
+          // Stop everything and re-mute so the next detection starts fresh
+          audioLive = false;
+          videoColor.muted = true; videoColor.volume = 0;
           if (!videoColor.paused) videoColor.pause();
           if (!videoAlpha.paused) videoAlpha.pause();
-          debug('Marker lost');
         });
 
-        // Show the gate on load for all platforms (one clear tap to enable sound)
+        // Show the gate for one clean gesture on any platform
         gate.hidden = false;
       }
     });
@@ -122,11 +133,11 @@
 <body style="margin: 0; overflow: hidden;">
   <div class="arjs-loader" id="loader"><div>Loading, please wait…</div></div>
 
-  <!-- One clear, explicit gesture to enable audio -->
+  <!-- One clear gesture to "arm" audio (no sound yet). Sound begins on marker detection. -->
   <div class="gate" id="gate" hidden>
     <div>
-      <div>Tap to enable audio (videos will display muted otherwise)</div>
-      <button class="btn" id="enableBtn">Enable Sound</button>
+      <div>Tap once to arm audio. Sound will start when the image is detected.</div>
+      <button class="btn" id="enableBtn">Arm Audio</button>
     </div>
   </div>
   <div class="debug" id="debug">Init…</div>
@@ -139,7 +150,7 @@
     onloaded="document.getElementById('loader').style.display='none';"
   >
     <a-assets>
-      <!-- No autoplay attribute; playsinline; start muted -->
+      <!-- Keep muted; we unmute the color track exactly on markerFound -->
       <video
         id="videoColor"
         src="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/AR_Video02_Color.mp4"
