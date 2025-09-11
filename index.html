@@ -200,74 +200,6 @@
     </script>
 
     <script>
-      AFRAME.registerComponent('auto-size-to-marker', {
-        schema: {
-          colorVideo: { type: 'selector' },   
-          alphaVideo: { type: 'selector' },   
-          baseWidth:  { type: 'number', default: 1 }, 
-          fit:        { type: 'string', default: 'contain' }
-        },
-        
-        init: function () {
-          this.applied = false;
-          this.checkAndApply();
-        },
-
-        checkAndApply: function() {
-          const el = this.el;
-          const colorVid = this.data.colorVideo;
-          
-          if (!colorVid) {
-            console.warn('Color video element not found');
-            return;
-          }
-
-          const applySize = () => {
-            if (this.applied) return;
-            
-            const vw = colorVid.videoWidth;
-            const vh = colorVid.videoHeight;
-            
-            if (!vw || !vh) {
-              // Try again in next frame if dimensions not ready
-              requestAnimationFrame(() => this.checkAndApply());
-              return;
-            }
-
-            const videoAR = vw / vh;
-            let width = this.data.baseWidth;
-            let height = width / videoAR;
-
-            if (this.data.fit === 'cover') {
-              height = this.data.baseWidth;      
-              width = height * videoAR;
-            }
-
-            el.setAttribute('geometry', {
-              primitive: 'plane',
-              width: width,
-              height: height
-            });
-            
-            this.applied = true;
-          };
-
-          // Try to apply immediately if metadata is already loaded
-          if (colorVid.readyState >= 1) {
-            applySize();
-          } else {
-            // Wait for metadata to load
-            colorVid.addEventListener('loadedmetadata', applySize, { once: true });
-            // Fallback: try again after a short delay
-            setTimeout(() => {
-              if (!this.applied) applySize();
-            }, 100);
-          }
-        }
-      });
-    </script>
-
-    <script>
       AFRAME.registerShader('enhanced-video-matte-shader', {
         schema: {
           videoColor: { type: 'map', is: 'uniform' },
@@ -286,8 +218,9 @@
       });
     </script>
 
+    <!-- Enhanced marker with stability improvements -->
     <a-nft
-      adaptive-videoplayer="volume: 0.8" 
+      adaptive-videoplayer="width: 300; height: 150; volume: 0.8"
       type="nft"
       url="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/marker/AR_Image-tracker_Crab"
       smooth="true"
@@ -296,9 +229,7 @@
       smoothThreshold="3"
     >
       <a-entity
-        id="videoPlane"
-        geometry="primitive: plane; width: 1; height: 1"
-        auto-size-to-marker="colorVideo: #videoColor; alphaVideo: #videoAlpha; baseWidth: 1; fit: contain"
+        geometry="primitive: plane; width: 300; height: 150"
         material="shader: enhanced-video-matte-shader;
                   videoColor: #videoColor;
                   videoAlpha: #videoAlpha;
