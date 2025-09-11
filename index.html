@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Back Home AR Experience - Enhanced Stability</title>
+  <title>Back Home AR Experience</title>
 
   <script src="https://cdn.jsdelivr.net/gh/aframevr/aframe@1.6.0/dist/aframe-master.min.js"></script>
   <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar-nft.js"></script>
@@ -45,112 +45,14 @@
       }
     });
 
-    // Enhanced stabilizer with position, rotation, and scale smoothing
+    // Gentle content stabilizer
     AFRAME.registerComponent('stabilize', {
-      schema: { 
-        positionFactor: {default: 0.1},
-        rotationFactor: {default: 0.08},
-        scaleFactor: {default: 0.12},
-        hideThreshold: {default: 0.5}, // seconds before hiding on lost tracking
-        showThreshold: {default: 0.1}   // seconds of stable tracking before showing
-      },
-      init() {
-        this.prevPosition = null;
-        this.prevRotation = null;
-        this.prevScale = null;
-        this.trackingLost = false;
-        this.lostTime = 0;
-        this.foundTime = 0;
-        this.isVisible = true;
-      },
-      tick(time, deltaTime) {
-        const obj = this.el.object3D;
-        const parent = this.el.parentNode;
-        
-        // Check if parent (marker) is visible
-        const markerVisible = parent && parent.object3D.visible;
-        
-        if (markerVisible) {
-          this.foundTime += deltaTime / 1000;
-          this.lostTime = 0;
-          
-          // Smooth position
-          if (!this.prevPosition) this.prevPosition = obj.position.clone();
-          this.prevPosition.lerp(obj.position, this.data.positionFactor);
-          obj.position.copy(this.prevPosition);
-          
-          // Smooth rotation
-          if (!this.prevRotation) this.prevRotation = obj.quaternion.clone();
-          this.prevRotation.slerp(obj.quaternion, this.data.rotationFactor);
-          obj.quaternion.copy(this.prevRotation);
-          
-          // Smooth scale
-          if (!this.prevScale) this.prevScale = obj.scale.clone();
-          this.prevScale.lerp(obj.scale, this.data.scaleFactor);
-          obj.scale.copy(this.prevScale);
-          
-          // Show object if stable for enough time
-          if (this.foundTime > this.data.showThreshold) {
-            if (!this.isVisible) {
-              this.el.object3D.visible = true;
-              this.isVisible = true;
-            }
-          }
-        } else {
-          this.lostTime += deltaTime / 1000;
-          this.foundTime = 0;
-          
-          // Hide object if tracking lost for too long
-          if (this.lostTime > this.data.hideThreshold && this.isVisible) {
-            this.el.object3D.visible = false;
-            this.isVisible = false;
-          }
-        }
-      }
-    });
-
-    // Persistence component to maintain object visibility during brief tracking losses
-    AFRAME.registerComponent('persistent', {
-      schema: {
-        timeout: {default: 1000}, // ms to keep visible after marker lost
-        fadeOut: {default: true}
-      },
-      init() {
-        this.visible = false;
-        this.timeout = null;
-        this.originalOpacity = 1;
-      },
-      markerFound() {
-        this.visible = true;
-        this.el.object3D.visible = true;
-        if (this.timeout) {
-          clearTimeout(this.timeout);
-          this.timeout = null;
-        }
-        // Restore full opacity
-        const material = this.el.getAttribute('material');
-        if (material) {
-          this.el.setAttribute('material', 'opacity', this.originalOpacity);
-        }
-      },
-      markerLost() {
-        if (this.data.timeout > 0) {
-          this.timeout = setTimeout(() => {
-            this.visible = false;
-            this.el.object3D.visible = false;
-          }, this.data.timeout);
-          
-          // Optional fade out effect
-          if (this.data.fadeOut) {
-            const material = this.el.getAttribute('material');
-            if (material) {
-              this.el.setAttribute('material', 'opacity', 0.3);
-            }
-          }
-        } else {
-          this.visible = false;
-          this.el.object3D.visible = false;
-        }
+      schema: { factor: {default: 0.15} },
+      tick() {
+        const p = this.el.object3D.position;
+        if (!this.prev) this.prev = p.clone();
+        this.prev.lerp(p, this.data.factor);
+        this.el.object3D.position.copy(this.prev);
       }
     });
 
@@ -188,15 +90,9 @@
         };
         btn.addEventListener('click', armAudio, { once: true });
 
-        // Marker events with enhanced stability handling
+        // Marker events
         this.el.addEventListener('markerFound', async () => {
           debug('Marker found');
-          
-          // Notify persistence component
-          const videoPlane = document.getElementById('videoPlane');
-          const persistent = videoPlane.components.persistent;
-          if (persistent) persistent.markerFound();
-          
           // Make sure frames are flowing
           if (videoColor.paused) videoColor.play().catch(()=>{});
           if (videoAlpha.paused) videoAlpha.play().catch(()=>{});
@@ -219,20 +115,12 @@
         });
 
         this.el.addEventListener('markerLost', () => {
-          debug('Marker lost - maintaining stability');
-          
-          // Notify persistence component
-          const videoPlane = document.getElementById('videoPlane');
-          const persistent = videoPlane.components.persistent;
-          if (persistent) persistent.markerLost();
-          
-          // Keep videos playing briefly to avoid restart delays
-          setTimeout(() => {
-            audioLive = false;
-            videoColor.muted = true; videoColor.volume = 0;
-            if (!videoColor.paused) videoColor.pause();
-            if (!videoAlpha.paused) videoAlpha.pause();
-          }, 500); // Small delay to allow for quick re-detection
+          debug('Marker lost');
+          // Stop everything and re-mute so the next detection starts fresh
+          audioLive = false;
+          videoColor.muted = true; videoColor.volume = 0;
+          if (!videoColor.paused) videoColor.pause();
+          if (!videoAlpha.paused) videoAlpha.pause();
         });
 
         // Show the gate for one clean gesture on any platform
@@ -316,29 +204,25 @@
       });
     </script>
 
-    <!-- NFT marker with improved smoothing settings -->
+    <!-- NFT marker with smoothing to reduce jitter -->
     <a-nft
       videoplayer
       type="nft"
       url="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/marker/AR_Image-tracker_Crab"
       smooth="true"
-      smoothCount="15"
-      smoothTolerance="0.02"
-      smoothThreshold="3"
-      detectionMode="mono_and_matrix"
-      matrixCodeType="3x3"
+      smoothCount="10"
+      smoothTolerance="0.01"
+      smoothThreshold="5"
     >
-      <!-- Plane: auto-fit to color video aspect; enhanced stabilizer for smoothness -->
+      <!-- Plane: auto-fit to color video aspect; light stabilizer for extra smoothness -->
       <a-entity id="videoPlane"
         fit-video-plane="target: #videoColor; baseWidth: 300"
-        stabilize="positionFactor: 0.08; rotationFactor: 0.06; scaleFactor: 0.1; hideThreshold: 0.8; showThreshold: 0.2"
-        persistent="timeout: 1500; fadeOut: true"
+        stabilize="factor: 0.5"
         geometry="primitive: plane; width: 300; height: 150"
         material="shader: video-matte-shader;
                   videoColor: #videoColor;
                   videoAlpha: #videoAlpha;
-                  transparent: true;
-                  alphaTest: 0.1;"
+                  transparent: true;"
         position="0 0 0.1"
         rotation="-90 0 0"
       ></a-entity>
