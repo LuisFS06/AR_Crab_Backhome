@@ -2,18 +2,31 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Back Home AR — MindAR Stable Video</title>
+  <title>Back Home AR — MindAR Fixed</title>
 
-  <!-- A-Frame and MindAR -->
-  <script src="https://cdn.jsdelivr.net/npm/aframe@1.4.2/dist/aframe.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/aframe/mindar-image-aframe.prod.js"></script>
+  <!-- A-Frame and MindAR with compatible versions -->
+  <script src="https://cdn.jsdelivr.net/npm/aframe@1.4.0/dist/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
 
   <style>
     html, body {
       margin: 0;
       height: 100%;
       overflow: hidden;
-      background: transparent;
+      background: #000;
+    }
+
+    #loadingOverlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.8);
+      color: #fff;
+      z-index: 10000;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
     }
 
     #soundOverlay {
@@ -28,7 +41,7 @@
       font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
     }
 
-    #soundOverlay button {
+    .overlay-button {
       background: #1976d2;
       color: #fff;
       border: none;
@@ -36,16 +49,44 @@
       padding: 12px 18px;
       font-weight: bold;
       font-size: 16px;
+      cursor: pointer;
+      margin: 10px;
+    }
+
+    .overlay-button:hover {
+      background: #1565c0;
+    }
+
+    #status {
+      margin-top: 20px;
+      font-size: 14px;
+      text-align: center;
+    }
+
+    .spinner {
+      border: 4px solid #333;
+      border-top: 4px solid #1976d2;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin-bottom: 20px;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
     }
   </style>
 
-  <!-- Custom Shader: Color + Alpha blending -->
+  <!-- Enhanced Video Shader -->
   <script>
-    AFRAME.registerShader('video-matte', {
+    AFRAME.registerShader('video-matte-enhanced', {
       schema: {
         videoColor: { type: 'map', is: 'uniform' },
         videoAlpha: { type: 'map', is: 'uniform' },
-        opacity: { type: 'number', default: 1, is: 'uniform' }
+        opacity: { type: 'number', default: 1, is: 'uniform' },
+        alphaThreshold: { type: 'number', default: 0.1, is: 'uniform' }
       },
       vertexShader: `
         varying vec2 vUV;
@@ -60,76 +101,327 @@
         uniform sampler2D videoColor;
         uniform sampler2D videoAlpha;
         uniform float opacity;
+        uniform float alphaThreshold;
         void main() {
           vec4 color = texture2D(videoColor, vUV);
           float alpha = texture2D(videoAlpha, vUV).r;
-          alpha = smoothstep(0.15, 0.95, alpha) * opacity;
+          
+          // Better alpha processing
+          alpha = smoothstep(alphaThreshold, 0.95, alpha) * opacity;
+          
+          // Premultiplied alpha
+          color.rgb *= alpha;
+          
           gl_FragColor = vec4(color.rgb, alpha);
         }
       `
+    });
+
+    // Debug component to monitor MindAR status
+    AFRAME.registerComponent('ar-debug', {
+      init: function() {
+        this.el.addEventListener('targetFound', (e) => {
+          console.log('Target found:', e.detail.targetIndex);
+          updateStatus('Target detected!');
+        });
+        
+        this.el.addEventListener('targetLost', (e) => {
+          console.log('Target lost:', e.detail.targetIndex);
+          updateStatus('Target lost - point camera at marker');
+        });
+      }
     });
   </script>
 </head>
 
 <body>
-  <!-- Tap to enable audio -->
-  <div id="soundOverlay">
+  <!-- Loading overlay -->
+  <div id="loadingOverlay">
+    <div class="spinner"></div>
+    <h2>Initializing AR Experience</h2>
+    <div id="status">Loading camera and AR system...</div>
+    <button id="startBtn" class="overlay-button" style="display:none;">Start AR Experience</button>
+    <button id="permissionBtn" class="overlay-button" style="display:none;">Grant Camera Permission</button>
+  </div>
+
+  <!-- Sound overlay -->
+  <div id="soundOverlay" style="display:none;">
     <div style="text-align:center">
       <p style="margin-bottom:10px;font-size:18px">Tap to enable sound 🔊</p>
-      <button id="soundBtn">Enable Audio</button>
+      <button id="soundBtn" class="overlay-button">Enable Audio</button>
     </div>
   </div>
 
   <a-scene
-    mindar-image="imageTargetSrc: https://raw.githubusercontent.com/alevalve/AR_Crab_Backhome/main/targets.mind; autoStart: true"
+    id="arScene"
+    mindar-image="imageTargetSrc: https://cdn.jsdelivr.net/gh/hiukim/mind-ar-js@1.2.5/examples/image-tracking/assets/card-example/card.mind; 
+                 autoStart: false; 
+                 uiLoading: no; 
+                 uiScanning: no; 
+                 uiError: no"
     vr-mode-ui="enabled: false"
-    device-orientation-permission-ui="enabled: true"
-    renderer="colorManagement: true, physicallyCorrectLights"
+    device-orientation-permission-ui="enabled: false"
+    renderer="colorManagement: true; antialias: true; alpha: true"
     embedded
+    ar-debug
   >
     <a-assets>
-      <!-- Color and Alpha videos -->
+      <!-- Videos with proper loading attributes -->
       <video id="videoColor"
              src="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/AR_Video02_Color.mp4"
-             loop muted playsinline webkit-playsinline crossorigin="anonymous"></video>
+             loop 
+             muted 
+             playsinline 
+             webkit-playsinline 
+             crossorigin="anonymous"
+             preload="auto"></video>
       <video id="videoAlpha"
              src="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/AR_Video02_Alpha.mp4"
-             loop muted playsinline webkit-playsinline crossorigin="anonymous"></video>
+             loop 
+             muted 
+             playsinline 
+             webkit-playsinline 
+             crossorigin="anonymous"
+             preload="auto"></video>
     </a-assets>
 
-    <!-- MindAR target (index 0 = first marker in targets.mind) -->
+    <!-- MindAR target entity -->
     <a-entity mindar-image-target="targetIndex: 0">
       <a-plane
         id="videoPlane"
         width="1.2"
         height="0.67"
         rotation="-90 0 0"
-        material="shader: video-matte; videoColor: #videoColor; videoAlpha: #videoAlpha; transparent: true; depthWrite: false"
-        position="0 0 0"
+        material="shader: video-matte-enhanced; 
+                  videoColor: #videoColor; 
+                  videoAlpha: #videoAlpha; 
+                  transparent: true; 
+                  depthWrite: false;
+                  alphaThreshold: 0.1"
+        position="0 0 0.01"
+        visible="false"
       ></a-plane>
     </a-entity>
 
-    <!-- Camera -->
-    <a-camera look-controls="enabled: false"></a-camera>
+    <!-- Camera entity -->
+    <a-camera look-controls="enabled: false" cursor="rayOrigin: mouse"></a-camera>
   </a-scene>
 
   <script>
-    const overlay = document.getElementById('soundOverlay');
-    const btn = document.getElementById('soundBtn');
+    const loadingOverlay = document.getElementById('loadingOverlay');
+    const soundOverlay = document.getElementById('soundOverlay');
+    const startBtn = document.getElementById('startBtn');
+    const permissionBtn = document.getElementById('permissionBtn');
+    const soundBtn = document.getElementById('soundBtn');
+    const statusDiv = document.getElementById('status');
+    const scene = document.getElementById('arScene');
     const vc = document.getElementById('videoColor');
     const va = document.getElementById('videoAlpha');
+    const videoPlane = document.getElementById('videoPlane');
 
-    // Attempt autoplay (muted)
-    Promise.allSettled([vc.play(), va.play()]);
+    let arSystem = null;
+    let videosLoaded = false;
+    let cameraReady = false;
 
-    // Unlock audio on tap
-    btn.addEventListener('click', () => {
+    // Update status function
+    function updateStatus(message) {
+      console.log('Status:', message);
+      statusDiv.textContent = message;
+    }
+
+    // Check camera permissions
+    async function checkCameraPermission() {
+      try {
+        if (navigator.permissions) {
+          const permission = await navigator.permissions.query({ name: 'camera' });
+          return permission.state === 'granted';
+        }
+        return false;
+      } catch (error) {
+        console.warn('Permission API not supported:', error);
+        return false;
+      }
+    }
+
+    // Request camera permission
+    async function requestCameraPermission() {
+      try {
+        updateStatus('Requesting camera permission...');
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { 
+            facingMode: 'environment',
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          } 
+        });
+        
+        // Stop the stream immediately - we just needed permission
+        stream.getTracks().forEach(track => track.stop());
+        
+        updateStatus('Camera permission granted!');
+        return true;
+      } catch (error) {
+        console.error('Camera permission denied:', error);
+        updateStatus('Camera permission denied. Please allow camera access and refresh.');
+        return false;
+      }
+    }
+
+    // Load videos
+    async function loadVideos() {
+      updateStatus('Loading videos...');
+      
+      const colorPromise = new Promise((resolve, reject) => {
+        vc.addEventListener('loadeddata', resolve);
+        vc.addEventListener('error', reject);
+        vc.load();
+      });
+      
+      const alphaPromise = new Promise((resolve, reject) => {
+        va.addEventListener('loadeddata', resolve);
+        va.addEventListener('error', reject);
+        va.load();
+      });
+
+      try {
+        await Promise.all([colorPromise, alphaPromise]);
+        updateStatus('Videos loaded successfully!');
+        videosLoaded = true;
+        
+        // Start playing videos (muted)
+        await Promise.allSettled([vc.play(), va.play()]);
+        
+        return true;
+      } catch (error) {
+        console.error('Error loading videos:', error);
+        updateStatus('Error loading videos. Please check your connection.');
+        return false;
+      }
+    }
+
+    // Initialize MindAR
+    async function initializeMindAR() {
+      try {
+        updateStatus('Initializing AR system...');
+        
+        // Wait for A-Frame scene to be ready
+        await new Promise(resolve => {
+          if (scene.hasLoaded) {
+            resolve();
+          } else {
+            scene.addEventListener('loaded', resolve);
+          }
+        });
+
+        // Get the MindAR system
+        arSystem = scene.systems['mindar-image'];
+        
+        if (!arSystem) {
+          throw new Error('MindAR system not found');
+        }
+
+        // Start the AR system
+        await arSystem.start();
+        
+        updateStatus('AR system ready! Point camera at the target image.');
+        cameraReady = true;
+        
+        // Hide loading overlay and show sound overlay
+        loadingOverlay.style.display = 'none';
+        soundOverlay.style.display = 'flex';
+        
+        return true;
+      } catch (error) {
+        console.error('MindAR initialization failed:', error);
+        updateStatus(`AR initialization failed: ${error.message}`);
+        return false;
+      }
+    }
+
+    // Start the AR experience
+    async function startARExperience() {
+      updateStatus('Starting AR experience...');
+      
+      // Check camera permission first
+      const hasPermission = await checkCameraPermission();
+      if (!hasPermission) {
+        permissionBtn.style.display = 'block';
+        startBtn.style.display = 'none';
+        updateStatus('Camera permission required');
+        return;
+      }
+
+      // Load videos
+      const videosOk = await loadVideos();
+      if (!videosOk) return;
+
+      // Initialize MindAR
+      const arOk = await initializeMindAR();
+      if (!arOk) return;
+    }
+
+    // Event listeners
+    startBtn.addEventListener('click', startARExperience);
+    
+    permissionBtn.addEventListener('click', async () => {
+      const granted = await requestCameraPermission();
+      if (granted) {
+        permissionBtn.style.display = 'none';
+        startBtn.style.display = 'block';
+        updateStatus('Ready to start AR experience');
+      }
+    });
+
+    soundBtn.addEventListener('click', () => {
       vc.muted = false;
       vc.currentTime = 0;
       va.currentTime = 0;
       vc.play();
       va.play();
-      overlay.style.display = 'none';
+      soundOverlay.style.display = 'none';
+    });
+
+    // Show/hide video plane based on target detection
+    scene.addEventListener('targetFound', (e) => {
+      console.log('Target found event:', e.detail);
+      videoPlane.setAttribute('visible', true);
+    });
+
+    scene.addEventListener('targetLost', (e) => {
+      console.log('Target lost event:', e.detail);
+      videoPlane.setAttribute('visible', false);
+    });
+
+    // Video sync to prevent drift
+    setInterval(() => {
+      if (videosLoaded && Math.abs(vc.currentTime - va.currentTime) > 0.1) {
+        va.currentTime = vc.currentTime;
+      }
+    }, 1000);
+
+    // Auto-start the experience
+    setTimeout(() => {
+      if (loadingOverlay.style.display !== 'none') {
+        startBtn.style.display = 'block';
+        updateStatus('Ready to start - click the button below');
+      }
+    }, 2000);
+
+    // Handle page visibility changes
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        // Pause videos when page is hidden
+        if (videosLoaded) {
+          vc.pause();
+          va.pause();
+        }
+      } else {
+        // Resume videos when page is visible
+        if (videosLoaded && cameraReady) {
+          vc.play();
+          va.play();
+        }
+      }
     });
   </script>
 </body>
