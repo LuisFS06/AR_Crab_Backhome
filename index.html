@@ -12,152 +12,93 @@
     #soundOverlay button{ background:#1976d2; color:#fff; border:0; border-radius:10px; padding:12px 18px; font-weight:700; }
   </style>
 
+  <!-- Minimal color+alpha matte shader -->
   <script>
-    // --- Helper: quaternion average via eigenvector of scatter matrix ---
-    function averageQuaternion(quats){
-      const M = new Array(16).fill(0);
-      for(const q of quats){
-        const v=[q.x,q.y,q.z,q.w];
-        // outer product vv^T into 4x4 M
-        let idx=0;
-        for(let r=0;r<4;r++){
-          for(let c=0;c<4;c++){
-            M[idx++] += v[r]*v[c];
-          }
+    AFRAME.registerShader('video-matte', {
+      schema: { videoColor:{type:'map',is:'uniform'}, videoAlpha:{type:'map',is:'uniform'}, opacity:{type:'number',default:1,is:'uniform'} },
+      vertexShader: `
+        varying vec2 vUV;
+        void main(){ vUV=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }
+      `,
+      fragmentShader: `
+        precision highp float;
+        varying vec2 vUV;
+        uniform sampler2D videoColor, videoAlpha;
+        uniform float opacity;
+        void main(){
+          vec4 c=texture2D(videoColor,vUV);
+          float a=texture2D(videoAlpha,vUV).r;
+          a = smoothstep(0.15,0.95,a)*opacity;      /* crisper edges, less shimmer */
+          gl_FragColor=vec4(c.rgb,a);
         }
-      }
-      // Power iteration to get dominant eigenvector (simple & stable here)
-      let ev = [0,0,0,1]; // start near w-axis
-      for(let it=0; it<16; it++){
-        const nv=[0,0,0,0];
-        // nv = M * ev
-        for(let r=0;r<4;r++){
-          nv[r] = M[r*4+0]*ev[0]+M[r*4+1]*ev[1]+M[r*4+2]*ev[2]+M[r*4+3]*ev[3];
-        }
-        // normalize
-        const len = Math.hypot(nv[0],nv[1],nv[2],nv[3]) || 1;
-        ev = [nv[0]/len, nv[1]/len, nv[2]/len, nv[3]/len];
-      }
-      const q=new THREE.Quaternion(ev[0],ev[1],ev[2],ev[3]);
-      q.normalize();
-      return q;
-    }
-  
-    // --- Robust median ---
-    function medianVec3(vecs){
-      const xs=vecs.map(v=>v.x).sort((a,b)=>a-b);
-      const ys=vecs.map(v=>v.y).sort((a,b)=>a-b);
-      const zs=vecs.map(v=>v.z).sort((a,b)=>a-b);
-      const mid = Math.floor(xs.length/2);
-      const pick = (arr)=> arr.length%2? arr[mid] : 0.5*(arr[mid-1]+arr[mid]);
-      return new THREE.Vector3(pick(xs), pick(ys), pick(zs));
-    }
-  
+      `
+    });
 
-    AFRAME.registerComponent('pin-once-pro', {
+    /**
+     * pin-once: mimic WebXR "place once" stability
+     * - Wait for markerFound
+     * - Collect stable frames (low motion/rotation)
+     * - Average pose, detach #target into scene, freeze matrix (no more updates)
+     */
+    AFRAME.registerComponent('pin-once', {
       schema:{
         target:{type:'selector'},
-        streak:{type:'int', default: 28},          // consecutive stable frames required
-        posEps:{type:'number', default: 0.0005},   // meters/frame
-        rotEpsDeg:{type:'number', default: 0.15},  // degrees/frame
-        manual:{type:'boolean', default:false}     // tap to pin (after stable)
+        samples:{type:'int', default:24},
+        posEps:{type:'number', default:0.0007},   // meters/frame
+        rotEpsDeg:{type:'number', default:0.2}    // degrees/frame
       },
       init:function(){
-        this._collect=false; this._done=false;
-        this._lastPos=new THREE.Vector3();
-        this._lastQuat=new THREE.Quaternion();
-        this._tmpPos=new THREE.Vector3();
-        this._tmpQuat=new THREE.Quaternion();
-        this._tmpScale=new THREE.Vector3();
-        this._stable = [];           // holds recent stable poses
-        this._stableMax = this.data.streak;
-  
-        this._onClick = this._onClick.bind(this);
-  
-        this.el.addEventListener('markerFound', ()=>{
-          if(this._done) return;
-          this._collect = true;
-          this._stable.length = 0;
-        });
-  
-        this.el.addEventListener('markerLost', ()=>{
-          if(this._done) return;
-          this._collect = false;
-          this._stable.length = 0;
-        });
-  
-        if (this.data.manual) {
-          window.addEventListener('click', this._onClick);
-        }
-      },
-      remove:function(){
-        window.removeEventListener('click', this._onClick);
-      },
-      _onClick:function(){
-        if (!this.data.manual || this._done || !this._collect) return;
-        if (this._stable.length >= this._stableMax) {
-          this._finalizePin();
-        }
+        this._collect=false; this._done=false; this._poses=[];
+        this._lastPos=new THREE.Vector3(); this._lastQuat=new THREE.Quaternion();
+        this._tmpPos=new THREE.Vector3(); this._tmpQuat=new THREE.Quaternion(); this._tmpScale=new THREE.Vector3();
+
+        this.el.addEventListener('markerFound',()=>{ if(!this._done){ this._collect=true; this._poses.length=0; }});
+        this.el.addEventListener('markerLost', ()=>{ if(!this._done){ this._collect=false; this._poses.length=0; }});
       },
       tick:function(){
-        if(this._done || !this._collect) return;
-  
-        const obj=this.el.object3D;
-        obj.updateMatrixWorld(true);
+        if(this._done||!this._collect) return;
+        const obj=this.el.object3D; obj.updateMatrixWorld(true);
         obj.matrixWorld.decompose(this._tmpPos, this._tmpQuat, this._tmpScale);
-  
-        if(this._stable.length===0){
-          this._lastPos.copy(this._tmpPos);
-          this._lastQuat.copy(this._tmpQuat);
-        }
-  
-        const move = this._tmpPos.distanceTo(this._lastPos);
-        const dot  = Math.abs(THREE.MathUtils.clamp(this._lastQuat.dot(this._tmpQuat), -1, 1));
-        const ang  = THREE.MathUtils.radToDeg(2*Math.acos(dot));
-  
-        // Only accept if motion is tiny; otherwise reset the streak.
-        if (move <= this.data.posEps && ang <= this.data.rotEpsDeg) {
-          this._stable.push({ pos: this._tmpPos.clone(), quat: this._tmpQuat.clone() });
-          if (this._stable.length > this._stableMax) this._stable.shift();
+
+        if(this._poses.length===0){ this._lastPos.copy(this._tmpPos); this._lastQuat.copy(this._tmpQuat); }
+
+        const move=this._tmpPos.distanceTo(this._lastPos);
+        const dot=Math.abs(THREE.MathUtils.clamp(this._lastQuat.dot(this._tmpQuat),-1,1));
+        const ang=THREE.MathUtils.radToDeg(2*Math.acos(dot));
+
+        if(move<=this.data.posEps && ang<=this.data.rotEpsDeg){
+          this._poses.push({pos:this._tmpPos.clone(), quat:this._tmpQuat.clone()});
         } else {
-          this._stable.length = 0;
+          this._poses.length=0; // reset if jitter spikes
         }
-  
-        this._lastPos.copy(this._tmpPos);
-        this._lastQuat.copy(this._tmpQuat);
-  
-        if (!this.data.manual && this._stable.length >= this._stableMax) {
-          this._finalizePin();
+
+        this._lastPos.copy(this._tmpPos); this._lastQuat.copy(this._tmpQuat);
+
+        if(this._poses.length>=this.data.samples){
+          // Average position
+          const avgPos=new THREE.Vector3();
+          for(const p of this._poses) avgPos.add(p.pos);
+          avgPos.multiplyScalar(1/this._poses.length);
+          // Average rotation (incremental slerp)
+          let avgQuat=this._poses[0].quat.clone();
+          for(let i=1;i<this._poses.length;i++) avgQuat.slerp(this._poses[i].quat, 1/(i+1));
+
+          const t=this.data.target.object3D;
+          // Detach from marker, attach to scene (world)
+          this.el.sceneEl.object3D.attach(t);
+          // Freeze transform
+          t.matrixAutoUpdate=false;
+          const S=new THREE.Vector3(1,1,1);
+          const M=new THREE.Matrix4().compose(avgPos, avgQuat, S);
+          t.matrix.copy(M); t.updateMatrixWorld(true);
+
+          // Hide/disable marker anchor so it can't influence anything else
+          this.el.setAttribute('visible', false);
+          this._done=true; this._collect=false;
         }
-      },
-      _finalizePin:function(){
-        // Robust aggregate
-        const positions = this._stable.map(s=>s.pos);
-        const quats     = this._stable.map(s=>s.quat);
-        const avgPos    = medianVec3(positions);
-        const avgQuat   = averageQuaternion(quats);
-  
-        const t = this.data.target && this.data.target.object3D;
-        if (!t) { this._done=true; return; }
-  
-        // Detach to scene (world space), then freeze transform
-        this.el.sceneEl.object3D.attach(t);
-        t.matrixAutoUpdate = false;
-        t.frustumCulled = false;            // avoid renderer culling wobbles
-        const S = new THREE.Vector3(1,1,1);
-        const M = new THREE.Matrix4().compose(avgPos, avgQuat, S);
-        t.matrix.copy(M);
-        t.updateMatrixWorld(true);
-  
-        // Hide the anchor so it can't alter anything later
-        this.el.setAttribute('visible', false);
-  
-        this._done = true;
-        this._collect = false;
-        this._stable.length = 0;
       }
     });
-  </script>  
+  </script>
 </head>
 
 <body>
@@ -187,15 +128,15 @@
       type="nft"
       url="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/marker/AR_Image-tracker_Crab"
       smooth="true" smoothCount="60" smoothTolerance="0.005" smoothThreshold="5"
-      pin-once-pro="target:#pinned; streak:32; posEps:0.0005; rotEpsDeg:0.15; manual:false"
+      pin-once="target:#pinned; samples:24; posEps:0.0007; rotEpsDeg:0.2"
     >
+      <!-- Content starts under marker; gets detached & frozen after pin -->
       <a-entity id="pinned"
-        geometry="primitive: plane; width: 0.85; height: 0.67"
+        geometry="primitive: plane; width: 1.2; height: 0.67"
         material="shader: video-matte; videoColor: #videoColor; videoAlpha: #videoAlpha; transparent:true; depthWrite:false"
-        position="0 0 0.001" rotation="-90 0 0">
+        position="0 0 0.1" rotation="-90 0 0">
       </a-entity>
     </a-nft>
-
 
     <!-- AR.js controls camera; keep look-controls off to avoid device sway -->
     <a-entity camera look-controls="enabled:false"></a-entity>
