@@ -120,6 +120,7 @@
 
   <a-scene
     renderer="antialias: true; precision: medium; alpha: true"
+    background="transparent: true"
     webxr="requiredFeatures: hit-test; optionalFeatures: dom-overlay; overlayElement: #tapOverlay"
     vr-mode-ui="enabled: false"
   >
@@ -236,10 +237,7 @@
         videoAlpha.play();
       }
       
-      tapBtn.addEventListener('click', function(event) {
-        event.stopPropagation(); 
-        enableAudioAndStart();
-      });
+      tapBtn.addEventListener('click', enableAudioAndStart);
       
       window.addEventListener('click', function() {
         if (audioEnabled && !placed) {
