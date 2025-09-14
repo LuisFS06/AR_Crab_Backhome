@@ -2,319 +2,107 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Back Home AR — Enhanced Stability</title>
+  <title>Back Home AR — Marker-Fixed Video</title>
+
+  <!-- A-Frame and AR.js (NFT marker support) -->
   <script src="https://cdn.jsdelivr.net/gh/aframevr/aframe@1.6.0/dist/aframe-master.min.js"></script>
   <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar-nft.js"></script>
+
   <style>
-    html, body { margin:0; height:100%; overflow:hidden; background:transparent; }
-    #soundOverlay { position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
-      background:rgba(0,0,0,0.6); color:#fff; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; z-index:9999; }
-    #soundOverlay button{ background:#1976d2; color:#fff; border:0; border-radius:10px; padding:12px 18px; font-weight:700; }
-    #stabilityIndicator { position:fixed; top:20px; left:20px; background:rgba(0,0,0,0.7); color:#fff; 
-      padding:10px; border-radius:5px; font-family:monospace; font-size:12px; z-index:1000; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+    #soundOverlay {
+      position: fixed; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(0, 0, 0, 0.6);
+      color: #fff; z-index: 9999;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    }
+    #soundOverlay button {
+      background: #1976d2;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      padding: 12px 18px;
+      font-weight: bold;
+      font-size: 16px;
+    }
   </style>
 
-  <!-- Enhanced video+alpha matte shader with better blending -->
+  <!-- Matte Shader (Color + Alpha blend) -->
   <script>
-    AFRAME.registerShader('video-matte-enhanced', {
-      schema: { 
-        videoColor:{type:'map',is:'uniform'}, 
-        videoAlpha:{type:'map',is:'uniform'}, 
-        opacity:{type:'number',default:1,is:'uniform'},
-        alphaThreshold:{type:'number',default:0.1,is:'uniform'}
+    AFRAME.registerShader('video-matte', {
+      schema: {
+        videoColor: { type: 'map', is: 'uniform' },
+        videoAlpha: { type: 'map', is: 'uniform' },
+        opacity: { type: 'number', default: 1, is: 'uniform' }
       },
       vertexShader: `
         varying vec2 vUV;
-        void main(){ 
-          vUV = uv; 
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); 
+        void main() {
+          vUV = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }
       `,
       fragmentShader: `
         precision highp float;
         varying vec2 vUV;
-        uniform sampler2D videoColor, videoAlpha;
-        uniform float opacity, alphaThreshold;
-        void main(){
+        uniform sampler2D videoColor;
+        uniform sampler2D videoAlpha;
+        uniform float opacity;
+        void main() {
           vec4 color = texture2D(videoColor, vUV);
           float alpha = texture2D(videoAlpha, vUV).r;
-          
-          // Enhanced alpha processing with better edge handling
-          alpha = smoothstep(alphaThreshold, 0.95, alpha) * opacity;
-          
-          // Premultiplied alpha for better blending
-          color.rgb *= alpha;
-          
+          alpha = smoothstep(0.15, 0.95, alpha) * opacity;
           gl_FragColor = vec4(color.rgb, alpha);
         }
       `
-    });
-
-    /**
-     * Enhanced pin-once with better stability detection and pose filtering
-     */
-    AFRAME.registerComponent('enhanced-pin-once', {
-      schema:{
-        target: {type:'selector'},
-        samples: {type:'int', default:40},          // More samples for better averaging
-        posEps: {type:'number', default:0.0005},    // Tighter position threshold
-        rotEpsDeg: {type:'number', default:0.15},   // Tighter rotation threshold
-        minConfidence: {type:'number', default:0.8}, // Minimum tracking confidence
-        outlierThreshold: {type:'number', default:2.5}, // Standard deviations for outlier detection
-        stabilityWindow: {type:'int', default:10}   // Recent frames to check for stability
-      },
-      
-      init:function(){
-        this._collect = false; 
-        this._done = false; 
-        this._poses = [];
-        this._recentPoses = [];
-        this._lastPos = new THREE.Vector3(); 
-        this._lastQuat = new THREE.Quaternion();
-        this._tmpPos = new THREE.Vector3(); 
-        this._tmpQuat = new THREE.Quaternion(); 
-        this._tmpScale = new THREE.Vector3();
-        this._stabilityScore = 0;
-        this._confidenceHistory = [];
-        
-        // Create stability indicator
-        this._indicator = document.createElement('div');
-        this._indicator.id = 'stabilityIndicator';
-        this._indicator.innerHTML = 'Stability: Searching...';
-        document.body.appendChild(this._indicator);
-
-        this.el.addEventListener('markerFound', () => { 
-          if(!this._done){ 
-            this._collect = true; 
-            this._poses.length = 0; 
-            this._recentPoses.length = 0;
-            this._stabilityScore = 0;
-            this._updateIndicator('Collecting poses...');
-          }
-        });
-        
-        this.el.addEventListener('markerLost', () => { 
-          if(!this._done){ 
-            this._collect = false; 
-            this._poses.length = 0; 
-            this._recentPoses.length = 0;
-            this._stabilityScore = 0;
-            this._updateIndicator('Marker lost');
-          }
-        });
-      },
-      
-      _updateIndicator: function(status) {
-        if(this._indicator) {
-          const progress = Math.min(this._poses.length / this.data.samples, 1) * 100;
-          this._indicator.innerHTML = `
-            Status: ${status}<br>
-            Progress: ${progress.toFixed(0)}%<br>
-            Stability: ${this._stabilityScore.toFixed(2)}<br>
-            Poses: ${this._poses.length}/${this.data.samples}
-          `;
-        }
-      },
-      
-      _isOutlier: function(pose) {
-        if(this._poses.length < 5) return false;
-        
-        // Calculate mean position
-        const meanPos = new THREE.Vector3();
-        for(const p of this._poses) meanPos.add(p.pos);
-        meanPos.multiplyScalar(1 / this._poses.length);
-        
-        // Calculate standard deviation
-        let variance = 0;
-        for(const p of this._poses) {
-          variance += meanPos.distanceToSquared(p.pos);
-        }
-        const stdDev = Math.sqrt(variance / this._poses.length);
-        
-        // Check if current pose is an outlier
-        const distance = meanPos.distanceTo(pose.pos);
-        return distance > (stdDev * this.data.outlierThreshold);
-      },
-      
-      _calculateStabilityScore: function() {
-        if(this._recentPoses.length < 2) return 0;
-        
-        let totalMovement = 0;
-        let totalRotation = 0;
-        
-        for(let i = 1; i < this._recentPoses.length; i++) {
-          const prev = this._recentPoses[i-1];
-          const curr = this._recentPoses[i];
-          
-          totalMovement += prev.pos.distanceTo(curr.pos);
-          
-          const dot = Math.abs(THREE.MathUtils.clamp(prev.quat.dot(curr.quat), -1, 1));
-          totalRotation += THREE.MathUtils.radToDeg(2 * Math.acos(dot));
-        }
-        
-        const avgMovement = totalMovement / (this._recentPoses.length - 1);
-        const avgRotation = totalRotation / (this._recentPoses.length - 1);
-        
-        // Score from 0-1, higher is more stable
-        const moveScore = Math.max(0, 1 - (avgMovement / this.data.posEps));
-        const rotScore = Math.max(0, 1 - (avgRotation / this.data.rotEpsDeg));
-        
-        return (moveScore + rotScore) / 2;
-      },
-      
-      tick:function(){
-        if(this._done || !this._collect) return;
-        
-        const obj = this.el.object3D; 
-        obj.updateMatrixWorld(true);
-        obj.matrixWorld.decompose(this._tmpPos, this._tmpQuat, this._tmpScale);
-
-        // Add to recent poses for stability calculation
-        this._recentPoses.push({
-          pos: this._tmpPos.clone(), 
-          quat: this._tmpQuat.clone()
-        });
-        
-        if(this._recentPoses.length > this.data.stabilityWindow) {
-          this._recentPoses.shift();
-        }
-        
-        // Calculate stability score
-        this._stabilityScore = this._calculateStabilityScore();
-        
-        if(this._poses.length === 0) { 
-          this._lastPos.copy(this._tmpPos); 
-          this._lastQuat.copy(this._tmpQuat); 
-        }
-
-        const move = this._tmpPos.distanceTo(this._lastPos);
-        const dot = Math.abs(THREE.MathUtils.clamp(this._lastQuat.dot(this._tmpQuat), -1, 1));
-        const ang = THREE.MathUtils.radToDeg(2 * Math.acos(dot));
-
-        // Check if pose is stable and not an outlier
-        const isStable = move <= this.data.posEps && ang <= this.data.rotEpsDeg;
-        const currentPose = {pos: this._tmpPos.clone(), quat: this._tmpQuat.clone()};
-        
-        if(isStable && !this._isOutlier(currentPose) && this._stabilityScore > 0.7) {
-          this._poses.push(currentPose);
-          this._updateIndicator('Collecting stable poses...');
-        } else if(!isStable || this._stabilityScore < 0.5) {
-          // Reset if movement is too high or stability drops
-          if(this._poses.length > 10) {
-            this._poses.splice(0, Math.floor(this._poses.length / 2)); // Keep some poses
-          } else {
-            this._poses.length = 0;
-          }
-          this._updateIndicator('Waiting for stability...');
-        }
-
-        this._lastPos.copy(this._tmpPos); 
-        this._lastQuat.copy(this._tmpQuat);
-
-        if(this._poses.length >= this.data.samples) {
-          this._pinContent();
-        }
-      },
-      
-      _pinContent: function() {
-        // Weighted average - give more weight to recent poses
-        const avgPos = new THREE.Vector3();
-        const avgQuat = this._poses[0].quat.clone();
-        let totalWeight = 0;
-        
-        for(let i = 0; i < this._poses.length; i++) {
-          const weight = (i + 1) / this._poses.length; // Linear weighting
-          avgPos.add(this._poses[i].pos.clone().multiplyScalar(weight));
-          totalWeight += weight;
-          
-          if(i > 0) {
-            const t = weight / (totalWeight);
-            avgQuat.slerp(this._poses[i].quat, t);
-          }
-        }
-        avgPos.multiplyScalar(1 / totalWeight);
-
-        const target = this.data.target.object3D;
-        
-        // Detach from marker, attach to scene
-        this.el.sceneEl.object3D.attach(target);
-        
-        // Freeze transform with averaged pose
-        target.matrixAutoUpdate = false;
-        const finalMatrix = new THREE.Matrix4().compose(
-          avgPos, 
-          avgQuat, 
-          new THREE.Vector3(1, 1, 1)
-        );
-        target.matrix.copy(finalMatrix);
-        target.updateMatrixWorld(true);
-
-        // Hide marker
-        this.el.setAttribute('visible', false);
-        
-        this._done = true; 
-        this._collect = false;
-        this._updateIndicator('PINNED - Stable!');
-        
-        // Hide indicator after 3 seconds
-        setTimeout(() => {
-          if(this._indicator) {
-            this._indicator.style.display = 'none';
-          }
-        }, 3000);
-      }
     });
   </script>
 </head>
 
 <body>
-  <!-- One-tap audio unlock -->
-  <div id="soundOverlay"><div style="text-align:center">
-    <div style="margin-bottom:10px;font-size:18px">Tap to enable sound 🔊</div>
-    <button id="soundBtn">Enable Audio</button>
-  </div></div>
+  <!-- One-tap unlock for video audio -->
+  <div id="soundOverlay">
+    <div style="text-align:center">
+      <p style="margin-bottom:10px;font-size:18px">Tap to enable sound 🔊</p>
+      <button id="soundBtn">Enable Audio</button>
+    </div>
+  </div>
 
   <a-scene
-    vr-mode-ui="enabled:false"
+    vr-mode-ui="enabled: false"
     embedded
-    renderer="antialias:true; alpha:true; precision:medium; colorManagement:true"
-    arjs="sourceType: webcam; trackingMethod: best; debugUIEnabled:false; detectionMode: mono_and_matrix; matrixCodeType: 3x3"
+    renderer="antialias: true; alpha: true; precision: medium"
+    arjs="sourceType: webcam; trackingMethod: best; debugUIEnabled: false"
   >
     <a-assets>
       <video id="videoColor"
              src="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/AR_Video02_Color.mp4"
-             loop muted playsinline webkit-playsinline crossorigin="anonymous"
-             preload="auto"></video>
+             loop muted playsinline webkit-playsinline crossorigin="anonymous"></video>
       <video id="videoAlpha"
              src="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/AR_Video02_Alpha.mp4"
-             loop muted playsinline webkit-playsinline crossorigin="anonymous"
-             preload="auto"></video>
+             loop muted playsinline webkit-playsinline crossorigin="anonymous"></video>
     </a-assets>
 
-    <!-- Enhanced NFT marker with optimized smoothing -->
+    <!-- Marker and content (video plane attached directly to marker) -->
     <a-nft
       type="nft"
       url="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/marker/AR_Image-tracker_Crab"
-      smooth="true" 
-      smoothCount="30" 
-      smoothTolerance="0.01" 
-      smoothThreshold="2"
-      enhanced-pin-once="target:#pinned; samples:40; posEps:0.0005; rotEpsDeg:0.15"
+      smooth="true"
+      smoothCount="60"
+      smoothTolerance="0.005"
+      smoothThreshold="5"
     >
-      <!-- Content to be pinned -->
-      <a-entity id="pinned"
+      <a-entity id="videoPlane"
         geometry="primitive: plane; width: 1.2; height: 0.67"
-        material="shader: video-matte-enhanced; videoColor: #videoColor; videoAlpha: #videoAlpha; transparent:true; depthWrite:false; alphaThreshold:0.1"
-        position="0 0 0.1" 
+        material="shader: video-matte; videoColor: #videoColor; videoAlpha: #videoAlpha; transparent: true; depthWrite: false"
+        position="0 0 0.1"
         rotation="-90 0 0">
       </a-entity>
     </a-nft>
 
-    <!-- Camera with enhanced settings -->
-    <a-entity camera 
-              look-controls="enabled:false"
-              arjs-camera="sourceType: webcam; trackingMethod: best">
-    </a-entity>
+    <!-- Camera (AR.js handles pose, no user control needed) -->
+    <a-entity camera look-controls="enabled: false"></a-entity>
   </a-scene>
 
   <script>
@@ -323,45 +111,18 @@
     const vc = document.getElementById('videoColor');
     const va = document.getElementById('videoAlpha');
 
-    // Enhanced video loading with error handling
-    function loadVideos() {
-      const promises = [
-        new Promise((resolve, reject) => {
-          vc.addEventListener('loadeddata', resolve);
-          vc.addEventListener('error', reject);
-          vc.load();
-        }),
-        new Promise((resolve, reject) => {
-          va.addEventListener('loadeddata', resolve);
-          va.addEventListener('error', reject);
-          va.load();
-        })
-      ];
-      
-      return Promise.allSettled(promises);
-    }
+    // Preload video (muted so it can autoplay on mobile)
+    Promise.allSettled([vc.play(), va.play()]);
 
-    // Start loading and playing videos
-    loadVideos().then(() => {
-      Promise.allSettled([vc.play(), va.play()]);
-    });
-
-    // User gesture to enable sound
+    // Wait for user interaction to enable sound
     btn.addEventListener('click', () => {
       vc.muted = false;
-      vc.currentTime = 0; 
+      vc.currentTime = 0;
       va.currentTime = 0;
-      vc.play(); 
+      vc.play();
       va.play();
       overlay.style.display = 'none';
     });
-
-    // Sync videos periodically to prevent drift
-    setInterval(() => {
-      if(Math.abs(vc.currentTime - va.currentTime) > 0.1) {
-        va.currentTime = vc.currentTime;
-      }
-    }, 1000);
   </script>
 </body>
 </html>
