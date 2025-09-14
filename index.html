@@ -13,7 +13,6 @@
     html, body { margin:0; height:100%; overflow:hidden; background:transparent; }
   </style>
 
-  <!-- Minimal color+alpha matte (optional; remove if you only need a single video or a texture) -->
   <script>
     AFRAME.registerShader('video-matte', {
       schema: {
@@ -61,7 +60,7 @@
     <a-entity id="marker" mindar-image-target="targetIndex: 0">
       <!-- Show your composited video only when tracked -->
       <a-plane id="videoPlane"
-        width="1.2" height="0.67"
+        width="0.9" height="0.60"
         rotation="-15 0 0" position="0 0 0"
         visible="false"
         material="shader: video-matte; videoColor: #videoColor; videoAlpha: #videoAlpha; transparent: true; depthWrite: false">
