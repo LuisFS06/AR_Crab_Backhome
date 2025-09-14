@@ -2,214 +2,260 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Back Home AR — Variant/WebXR (Minimal)</title>
-
-
-  <!-- A-Frame -->
-  <script src="https://cdn.jsdelivr.net/gh/aframevr/aframe@1.6.0/dist/aframe-master.min.js"></script>
-
+  <title>Back Home AR — Fixed Version</title>
+  
+  <!-- A-Frame - using stable CDN -->
+  <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+  
   <style>
-    html, body { margin:0; height:100%; overflow:hidden; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-    #loader, #tapOverlay, #audioStatus {
-      position: fixed; inset: 0; display: none; align-items: center; justify-content: center; z-index: 1000;
+    html, body { 
+      margin: 0; 
+      height: 100%; 
+      overflow: hidden; 
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; 
     }
-    #loader { display:flex; background: rgba(0,0,0,0.85); color:#fff; }
-    #tapOverlay { background: rgba(0,0,0,0.55); color:#fff; text-align:center; }
-    #tapOverlay button { margin-top:12px; padding:10px 16px; border:0; border-radius:999px; color:#fff; background:#1976d2; font-weight:700; }
-    #audioStatus { pointer-events:none; align-items:flex-end; justify-content:flex-end; padding:16px; }
-    #audioChip { background: rgba(0,0,0,0.8); color:#fff; padding:8px 12px; border-radius:999px; font-size:12px; }
-    .hidden { display:none !important; }
+    
+    #loader {
+      position: fixed; 
+      top: 0; 
+      left: 0; 
+      width: 100%; 
+      height: 100%; 
+      background: rgba(0,0,0,0.85); 
+      color: #fff; 
+      display: flex; 
+      align-items: center; 
+      justify-content: center; 
+      z-index: 1000;
+      font-size: 18px;
+    }
+    
+    #tapOverlay {
+      position: fixed; 
+      top: 0; 
+      left: 0; 
+      width: 100%; 
+      height: 100%; 
+      background: rgba(0,0,0,0.7); 
+      color: #fff; 
+      display: none; 
+      align-items: center; 
+      justify-content: center; 
+      text-align: center; 
+      z-index: 1001;
+    }
+    
+    #tapOverlay button {
+      margin-top: 20px; 
+      padding: 15px 25px; 
+      border: 0; 
+      border-radius: 8px; 
+      color: #fff; 
+      background: #1976d2; 
+      font-weight: bold; 
+      font-size: 16px;
+      cursor: pointer;
+    }
+    
+    .hidden { 
+      display: none !important; 
+    }
+    
+    a-scene {
+      height: 100vh;
+      width: 100vw;
+    }
   </style>
-
-  <!-- Fragment shader: color video + separate alpha video -->
-  <script id="matte-shader" type="x-shader/x-fragment">
-    precision mediump float;
-    uniform sampler2D videoColor;
-    uniform sampler2D videoAlpha;
-    uniform float opacity;
-    varying vec2 vUV;
-    void main() {
-      vec4 c = texture2D(videoColor, vUV);
-      float a = texture2D(videoAlpha, vUV).r * opacity;
-      gl_FragColor = vec4(c.rgb, a);
-    }
-  </script>
-
-  <script>
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-    const isAndroid = /Android/i.test(navigator.userAgent);
-
-    // Register shader
-    AFRAME.registerShader('video-matte', {
-      schema: {
-        videoColor: { type: 'map', is: 'uniform' },
-        videoAlpha: { type: 'map', is: 'uniform' },
-        opacity:    { type: 'number', default: 1.0, is: 'uniform' }
-      },
-      fragmentShader: document.getElementById('matte-shader').textContent,
-      vertexShader: `
-        varying vec2 vUV;
-        void main() {
-          vUV = uv;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
-      `
-    });
-
-    // Hit-test placement (tap once to lock)
-    AFRAME.registerComponent('place-once', {
-      init() {
-        this.placed = false;
-        this.refSpace = null;
-        this.hitSource = null;
-
-        // Simple reticle
-        const reticle = document.createElement('a-ring');
-        reticle.setAttribute('radius-inner', '0.03');
-        reticle.setAttribute('radius-outer', '0.05');
-        reticle.setAttribute('rotation', '-90 0 0');
-        reticle.setAttribute('color', '#fff');
-        reticle.setAttribute('visible', 'false');
-        this.reticle = reticle;
-        this.el.sceneEl.appendChild(reticle);
-
-        const xr = this.el.sceneEl.renderer.xr;
-        xr.addEventListener('sessionstart', async () => {
-          const session = xr.getSession();
-          const [localRef, viewerRef] = await Promise.all([
-            session.requestReferenceSpace('local'),
-            session.requestReferenceSpace('viewer')
-          ]);
-          this.refSpace = localRef;
-          this.hitSource = await session.requestHitTestSource({ space: viewerRef });
-
-          const onTap = () => {
-            if (!this.placed) { this.placed = true; this.el.emit('content-placed'); }
-            window.removeEventListener('click', onTap);
-          };
-          window.addEventListener('click', onTap, { once: true });
-        });
-
-        xr.addEventListener('sessionend', () => {
-          this.reticle.setAttribute('visible', 'false');
-          this.hitSource = null; this.refSpace = null; this.placed = false;
-        });
-
-        this.el.sceneEl.renderer.setAnimationLoop((t, frame) => {
-          if (!frame || !this.hitSource || !this.refSpace) return;
-          const hits = frame.getHitTestResults(this.hitSource);
-          if (hits.length) {
-            const pose = hits[0].getPose(this.refSpace);
-            const {position, orientation} = pose.transform;
-            this.reticle.object3D.position.set(position.x, position.y, position.z);
-            this.reticle.object3D.quaternion.set(orientation.x, orientation.y, orientation.z, orientation.w);
-            this.reticle.setAttribute('visible', !this.placed);
-
-            if (!this.placed) {
-              this.el.object3D.position.copy(this.reticle.object3D.position);
-              this.el.object3D.quaternion.copy(this.reticle.object3D.quaternion);
-            }
-          }
-        });
-      }
-    });
-
-    // Minimal video controller (audio unlock + play/pause on AR/placement)
-    AFRAME.registerComponent('video-controller', {
-      schema: { volume: {type: 'number', default: 0.8} },
-      init() {
-        this.vc = document.getElementById('videoColor');
-        this.va = document.getElementById('videoAlpha');
-        this.audioStatus = document.getElementById('audioStatus');
-        this.tapOverlay  = document.getElementById('tapOverlay');
-        this.audioUnlocked = false;
-        this.placed = false;
-
-        // Prepare videos
-        this.vc.muted = true; this.va.muted = true;
-        this.vc.volume = this.data.volume; this.va.volume = 0;
-
-        // Simple unlock: show overlay on iOS/Android
-        if (isIOS || isAndroid) this.tapOverlay.style.display = 'flex';
-
-        const enableAudio = () => {
-          this.audioUnlocked = true;
-          this.tapOverlay.classList.add('hidden');
-          this.update();
-        };
-        document.getElementById('tapBtn').addEventListener('click', enableAudio, { once:true });
-        this.tapOverlay.addEventListener('click', enableAudio, { once:true });
-
-        // React to placement
-        this.el.addEventListener('content-placed', () => { this.placed = true; this.update(); });
-
-        // Scene / session changes
-        const xr = this.el.sceneEl.renderer.xr;
-        xr.addEventListener('sessionstart', () => this.update());
-        xr.addEventListener('sessionend',   () => { this.pause(); this.audioStatus.classList.add('hidden'); });
-
-        // Hide loader when scene ready
-        const scene = this.el.sceneEl;
-        const hideLoader = () => document.getElementById('loader').classList.add('hidden');
-        scene.hasLoaded ? hideLoader() : scene.addEventListener('loaded', hideLoader);
-        xr.addEventListener('sessionstart', hideLoader);
-      },
-      update() {
-        const inAR = this.el.sceneEl.is('ar-mode');
-        const shouldPlay = inAR && this.placed;
-        if (!shouldPlay) return this.pause();
-
-        this.vc.muted = !this.audioUnlocked;
-        this.audioStatus.classList.remove('hidden');
-        this.audioStatus.innerHTML = `<div id="audioChip">${this.audioUnlocked ? '🔊 Audio ON' : '🔇 Audio OFF — Tap Enable'}</div>`;
-        this.vc.play().catch(()=>{});
-        this.va.play().catch(()=>{});
-      },
-      pause() { if (!this.vc.paused) this.vc.pause(); if (!this.va.paused) this.va.pause(); }
-    });
-  </script>
 </head>
 
 <body>
-  <!-- Simple loader -->
-  <div id="loader"><div style="color:#fff">Loading…</div></div>
+  <!-- Loader -->
+  <div id="loader">
+    <div>Loading AR Experience...</div>
+  </div>
 
-  <!-- DOM overlay used for audio unlock (shown on mobile) -->
-  <div id="tapOverlay" class="hidden">
+  <!-- Audio unlock overlay -->
+  <div id="tapOverlay">
     <div>
-      <div>Tap to enable audio</div>
-      <button id="tapBtn">Enable</button>
+      <div style="font-size: 20px; margin-bottom: 10px;">AR Experience Ready</div>
+      <div style="margin-bottom: 20px;">Tap to start and enable audio</div>
+      <button id="tapBtn">Start AR</button>
     </div>
   </div>
 
-  <!-- Tiny corner status -->
-  <div id="audioStatus" class="hidden"><div id="audioChip"></div></div>
-
   <a-scene
-    renderer="antialias: true; precision: medium;"
-    webxr="optionalFeatures: hit-test, dom-overlay; overlayElement: #tapOverlay"
+    renderer="antialias: true; precision: medium"
+    webxr="requiredFeatures: hit-test; optionalFeatures: dom-overlay; overlayElement: #tapOverlay"
     vr-mode-ui="enabled: false"
     embedded
+    background="color: transparent"
   >
     <a-assets>
       <video id="videoColor"
              src="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/AR_Video02_Color.mp4"
-             preload="metadata" loop muted crossorigin="anonymous" playsinline webkit-playsinline></video>
+             preload="auto" 
+             loop 
+             muted 
+             crossorigin="anonymous" 
+             playsinline 
+             webkit-playsinline>
+      </video>
       <video id="videoAlpha"
              src="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/AR_Video02_Alpha.mp4"
-             preload="metadata" loop muted crossorigin="anonymous" playsinline webkit-playsinline></video>
+             preload="auto" 
+             loop 
+             muted 
+             crossorigin="anonymous" 
+             playsinline 
+             webkit-playsinline>
+      </video>
     </a-assets>
 
-    <!-- Root follows reticle; locks on first tap -->
-    <a-entity place-once video-controller>
-      <a-entity
-        geometry="primitive: plane; width: 1.25; height: 0.67"
-        material="shader: video-matte; videoColor: #videoColor; videoAlpha: #videoAlpha; opacity: 1.0; transparent: true; alphaTest: 0.1"
-        rotation="-90 0 0">
-      </a-entity>
-    </a-entity>
+    <!-- Simple plane for the video -->
+    <a-plane
+      id="videoPlane"
+      width="1.2"
+      height="0.67"
+      position="0 0 -2"
+      rotation="-90 0 0"
+      material="src: #videoColor; transparent: true; alphaTest: 0.1"
+      visible="false"
+    ></a-plane>
 
-    <a-entity camera wasd-controls="enabled:false"></a-entity>
+    <a-camera wasd-controls="enabled: false"></a-camera>
   </a-scene>
+
+  <script>
+    console.log('Script starting...');
+    
+    // Wait for A-Frame to be ready
+    document.addEventListener('DOMContentLoaded', function() {
+      console.log('DOM loaded');
+      
+      const scene = document.querySelector('a-scene');
+      const loader = document.getElementById('loader');
+      const tapOverlay = document.getElementById('tapOverlay');
+      const tapBtn = document.getElementById('tapBtn');
+      const videoPlane = document.getElementById('videoPlane');
+      const videoColor = document.getElementById('videoColor');
+      const videoAlpha = document.getElementById('videoAlpha');
+      
+      let audioEnabled = false;
+      let placed = false;
+      
+      // Hide loader when scene is ready
+      function hideLoader() {
+        console.log('Hiding loader');
+        loader.classList.add('hidden');
+        
+        // Show tap overlay for mobile devices
+        const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        if (isMobile) {
+          tapOverlay.style.display = 'flex';
+        }
+      }
+      
+      // Scene loaded handler
+      if (scene.hasLoaded) {
+        hideLoader();
+      } else {
+        scene.addEventListener('loaded', hideLoader);
+      }
+      
+      // Enable audio and start AR
+      function enableAudioAndStart() {
+        console.log('Enabling audio and starting AR');
+        audioEnabled = true;
+        tapOverlay.classList.add('hidden');
+        
+        // Unmute videos
+        videoColor.muted = false;
+        videoColor.volume = 0.8;
+        
+        // Start playing videos
+        videoColor.play().catch(e => console.warn('Video play failed:', e));
+        videoAlpha.play().catch(e => console.warn('Alpha video play failed:', e));
+        
+        // Show video plane
+        videoPlane.setAttribute('visible', true);
+      }
+      
+      // Tap button handler
+      tapBtn.addEventListener('click', enableAudioAndStart);
+      
+      // Simple hit-test component
+      AFRAME.registerComponent('simple-hit-test', {
+        init: function () {
+          const el = this.el;
+          const xr = el.sceneEl.renderer.xr;
+          
+          xr.addEventListener('sessionstart', async () => {
+            console.log('XR session started');
+            try {
+              const session = xr.getSession();
+              const refSpace = await session.requestReferenceSpace('local');
+              const viewerSpace = await session.requestReferenceSpace('viewer');
+              const hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
+              
+              // Simple placement on first tap
+              const onTap = () => {
+                if (!placed) {
+                  placed = true;
+                  console.log('Content placed');
+                  enableAudioAndStart();
+                }
+              };
+              
+              window.addEventListener('click', onTap, { once: true });
+              
+              // Animation loop for hit testing
+              el.sceneEl.renderer.setAnimationLoop((time, frame) => {
+                if (!frame || !hitTestSource || placed) return;
+                
+                const hitTestResults = frame.getHitTestResults(hitTestSource);
+                if (hitTestResults.length > 0) {
+                  const hit = hitTestResults[0];
+                  const pose = hit.getPose(refSpace);
+                  
+                  if (pose) {
+                    const position = pose.transform.position;
+                    const orientation = pose.transform.orientation;
+                    
+                    videoPlane.object3D.position.set(position.x, position.y, position.z);
+                    videoPlane.object3D.quaternion.set(orientation.x, orientation.y, orientation.z, orientation.w);
+                  }
+                }
+              });
+              
+            } catch (error) {
+              console.error('Hit test setup failed:', error);
+              // Fallback: show video plane at default position
+              videoPlane.setAttribute('visible', true);
+              enableAudioAndStart();
+            }
+          });
+        }
+      });
+      
+      // Add the component to the scene
+      scene.setAttribute('simple-hit-test', '');
+      
+      console.log('Script setup complete');
+    });
+    
+    // Error handling
+    window.addEventListener('error', function(e) {
+      console.error('JavaScript error:', e.error);
+    });
+    
+    // Video error handling
+    document.getElementById('videoColor').addEventListener('error', function(e) {
+      console.error('Video loading error:', e);
+    });
+    
+    document.getElementById('videoAlpha').addEventListener('error', function(e) {
+      console.error('Alpha video loading error:', e);
+    });
+  </script>
 </body>
 </html>
