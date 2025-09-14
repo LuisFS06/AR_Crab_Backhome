@@ -1,9 +1,11 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <title>Back Home AR</title>
   
+  <!-- A-Frame - using stable CDN -->
   <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
   
   <style>
@@ -12,6 +14,7 @@
       height: 100%; 
       overflow: hidden; 
       font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: transparent;
     }
     
     #loader {
@@ -59,6 +62,12 @@
     .hidden { 
       display: none !important; 
     }
+    
+    a-scene {
+      height: 100vh;
+      width: 100vw;
+      background: transparent !important;
+    }
 
     #reticle {
       position: absolute;
@@ -75,6 +84,7 @@
     }
   </style>
 
+  <!-- Fragment shader for video + alpha compositing -->
   <script id="matte-shader" type="x-shader/x-fragment">
     precision mediump float;
     uniform sampler2D videoColor;
@@ -91,24 +101,27 @@
 </head>
 
 <body>
+  <!-- Loader -->
   <div id="loader">
     <div>Loading AR Experience...</div>
   </div>
 
+  <!-- Audio unlock overlay -->
   <div id="tapOverlay">
     <div>
       <div style="font-size: 20px; margin-bottom: 10px;">AR Experience Ready</div>
-      <div style="margin-bottom: 20px;">Tap to start</div>
+      <div style="margin-bottom: 20px;">Tap to start and enable audio</div>
       <button id="tapBtn">Start AR</button>
     </div>
   </div>
 
+  <!-- Reticle for placement -->
   <div id="reticle"></div>
 
   <a-scene
-    renderer="antialias: true; precision: medium; alpha: true; colorManagement: true;"
+    renderer="antialias: true; precision: medium; alpha: true"
     background="transparent: true"
-    webxr="requiredFeatures: hit-test;"
+    webxr="requiredFeatures: hit-test; optionalFeatures: dom-overlay; overlayElement: #tapOverlay"
     vr-mode-ui="enabled: false"
   >
     <a-assets>
@@ -132,10 +145,13 @@
       </video>
     </a-assets>
 
+    <!-- Video plane with alpha compositing - hidden until placed -->
     <a-plane
       id="videoPlane"
       width="0.85"
       height="0.67"
+      position="0 1.3 -1"
+      rotation="-15 0 0"
       material="shader: video-matte; videoColor: #videoColor; videoAlpha: #videoAlpha; transparent: true; opacity: 1.0"
       visible="false"
     ></a-plane>
@@ -171,51 +187,59 @@
       const videoColor = document.getElementById('videoColor');
       const videoAlpha = document.getElementById('videoAlpha');
       
+      let audioEnabled = false;
       let placed = false;
       let hitTestSource = null;
       let refSpace = null;
       
-      function showStartUI() {
+      // Ensure background transparency for AR
+      scene.addEventListener('enter-vr', function () {
+        if (scene.is('ar-mode')) {
+          // Set renderer to be transparent for AR
+          scene.renderer.domElement.style.background = 'transparent';
+        }
+      });
+      
+      function hideLoader() {
         loader.classList.add('hidden');
-        tapOverlay.style.display = 'flex';
+        const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        if (isMobile) {
+          tapOverlay.style.display = 'flex';
+        } else {
+          reticle.style.display = 'block';
+        }
       }
       
       if (scene.hasLoaded) {
-        showStartUI();
+        hideLoader();
       } else {
-        scene.addEventListener('loaded', showStartUI);
+        scene.addEventListener('loaded', hideLoader);
       }
       
-      // The "Start AR" button click must directly trigger the enterVR() call
-      // This user gesture is required to activate the camera permission prompt on iOS
-      tapBtn.addEventListener('click', function() {
-        scene.enterVR();
-      });
-
-      // After the user accepts the AR session, hide the overlay and show the reticle
-      scene.addEventListener('enter-vr', () => {
-        if (scene.is('ar-mode')) {
-          tapOverlay.classList.add('hidden');
-          reticle.style.display = 'block';
-        }
-      });
+      function enableAudioAndStart() {
+        audioEnabled = true;
+        tapOverlay.classList.add('hidden');
+        reticle.style.display = 'block';
+      }
       
       function placeContent() {
         placed = true;
         reticle.style.display = 'none';
         videoPlane.setAttribute('visible', true);
         
-        // Unmute and play videos
-        videoColor.muted = false;
-        videoColor.volume = 0.8;
+        if (audioEnabled) {
+          videoColor.muted = false;
+          videoColor.volume = 0.8;
+        }
+        
         videoColor.play();
         videoAlpha.play();
       }
       
-      // Use a screen tap to place the content
+      tapBtn.addEventListener('click', enableAudioAndStart);
+      
       window.addEventListener('click', function() {
-        // Place content only if we are in an active AR session and it hasn't been placed yet
-        if (scene.is('ar-mode') && !placed && hitTestSource) {
+        if (audioEnabled && !placed) {
           placeContent();
         }
       });
@@ -227,6 +251,7 @@
         refSpace = await session.requestReferenceSpace('local');
         const viewerSpace = await session.requestReferenceSpace('viewer');
         hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
+        
       });
       
       xr.addEventListener('sessionend', function() {
@@ -239,7 +264,6 @@
         reticle.style.display = 'none';
       });
       
-      // Render loop to update the video plane's position using hit-testing
       scene.renderer.setAnimationLoop(function(time, frame) {
         if (!frame || !hitTestSource || !refSpace || placed) return;
         
@@ -249,9 +273,11 @@
           const pose = hit.getPose(refSpace);
           
           if (pose) {
-            // Use the hit-test pose to position and orient the video plane
-            videoPlane.object3D.position.copy(pose.transform.position);
-            videoPlane.object3D.quaternion.copy(pose.transform.orientation);
+            const position = pose.transform.position;
+            const orientation = pose.transform.orientation;
+            
+            videoPlane.object3D.position.set(position.x, position.y, position.z);
+            videoPlane.object3D.quaternion.set(orientation.x, orientation.y, orientation.z, orientation.w);
           }
         }
       });
