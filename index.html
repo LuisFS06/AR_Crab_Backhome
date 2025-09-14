@@ -2,39 +2,33 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Back Home AR — NFT Marker (Color+Alpha)</title>
+  <title>Back Home AR — WebXR Hit-Test + Real Camera</title>
 
   <!-- A-Frame -->
   <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
-  <!-- AR.js for A-Frame (NFT / image tracking) -->
-  <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar-nft.js"></script>
 
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta http-equiv="origin-trial" content="" />
 
   <style>
-    html, body {
-      margin: 0; height: 100%; overflow: hidden;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      background: transparent; /* don't paint behind the canvas */
-    }
-    /* Ensure A-Frame canvas is transparent */
+    html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+    /* Make sure the WebGL canvas doesn't paint a color */
     canvas.a-canvas { background: transparent !important; }
 
-    #loader {
+    /* Minimal UI; keep it non-blocking during AR */
+    #ui {
       position: fixed; inset: 0;
-      display: flex; align-items: center; justify-content: center;
-      background: rgba(0,0,0,0.85); color: #fff; z-index: 1000;
-      font-size: 18px;
+      display: grid; place-items: center;
+      pointer-events: none;   /* don't block AR taps */
+      z-index: 10; color: #fff; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
     }
-    #tapOverlay {
-      position: fixed; inset: 0;
-      display: none; align-items: center; justify-content: center; text-align: center;
-      background: rgba(0,0,0,0.7); color: #fff; z-index: 1001;
+    #startBtn {
+      pointer-events: auto;   /* clickable */
+      background: #1976d2; color: #fff; border: 0; border-radius: 10px;
+      padding: 14px 20px; font-weight: 700; font-size: 16px;
+      box-shadow: 0 6px 16px rgba(0,0,0,.25);
     }
-    #tapOverlay button {
-      margin-top: 16px; padding: 12px 20px; border: 0; border-radius: 8px;
-      background: #1976d2; color: #fff; font-weight: 700; font-size: 16px; cursor: pointer;
+    #tip {
+      margin-top: 10px; font-size: 14px; opacity: .85; text-align: center;
     }
     .hidden { display: none !important; }
   </style>
@@ -55,57 +49,47 @@
 </head>
 
 <body>
-  <!-- Loader -->
-  <div id="loader">Loading AR Experience…</div>
-
-  <!-- Audio unlock (required on iOS/Android for unmuted playback) -->
-  <div id="tapOverlay">
-    <div>
-      <div style="font-size:20px;margin-bottom:8px;">AR Ready</div>
-      <div>Tap to enable audio & start</div>
-      <button id="tapBtn">Start</button>
+  <!-- Lightweight UI (used to unlock audio and enter AR). Lives above canvas but doesn't block taps after start -->
+  <div id="ui">
+    <div id="panel">
+      <button id="startBtn">Start AR</button>
+      <div id="tip">Move phone to find a surface, then tap to place</div>
     </div>
   </div>
 
-  <!-- A-Frame scene with AR.js (marker-based) -->
   <a-scene
     embedded
     vr-mode-ui="enabled: false"
     renderer="alpha: true; antialias: true; precision: medium"
-    arjs="sourceType: webcam; detectionMode: mono_and_matrix; trackingMethod: best; debugUIEnabled: false; videoTexture: true;"
+    webxr="mode: ar; requiredFeatures: hit-test; optionalFeatures: dom-overlay; overlayElement: #ui"
   >
     <a-assets>
-      <!-- Your dual videos -->
       <video id="videoColor"
              src="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/AR_Video02_Color.mp4"
-             preload="auto" loop muted crossorigin="anonymous" playsinline webkit-playsinline>
-      </video>
+             preload="auto" loop muted crossorigin="anonymous" playsinline webkit-playsinline></video>
       <video id="videoAlpha"
              src="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/AR_Video02_Alpha.mp4"
-             preload="auto" loop muted crossorigin="anonymous" playsinline webkit-playsinline>
-      </video>
+             preload="auto" loop muted crossorigin="anonymous" playsinline webkit-playsinline></video>
     </a-assets>
 
-    <!-- NFT marker root: replace URL with your NFT marker folder path (no extension) -->
-    <a-nft
-      type="nft"
-      url="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/marker/AR_Image-tracker_Crab"
-      smooth="true" smoothCount="10" smoothTolerance="0.01" smoothThreshold="5"
-      emitevents="true"
-    >
-      <!-- Plane with matte shader (starts hidden; shown on markerFound) -->
-      <a-plane
-        id="videoPlane"
-        position="0 0 0"
-        rotation="-90 0 0"
-        width="1.2" height="0.67"
-        visible="false"
-        material="shader: video-matte; videoColor: #videoColor; videoAlpha: #videoAlpha; transparent: true; alphaTest: 0.001; opacity: 1"
-      ></a-plane>
-    </a-nft>
+    <!-- Reticle that follows the hit-test result -->
+    <a-entity id="reticle" visible="false">
+      <a-ring radius-inner="0.045" radius-outer="0.055" rotation="-90 0 0" material="side: double"></a-ring>
+      <a-entity position="0 0 0">
+        <a-triangle scale="0.06 0.06 0.06" position="0.09 0 0" rotation="-90 0 0"></a-triangle>
+      </a-entity>
+    </a-entity>
 
-    <!-- Camera (AR.js manages the real video feed behind the 3D content) -->
-    <a-entity camera></a-entity>
+    <!-- Video plane (hidden until placed) -->
+    <a-plane
+      id="videoPlane"
+      visible="false"
+      width="1.2"
+      height="0.67"
+      material="shader: video-matte; videoColor: #videoColor; videoAlpha: #videoAlpha; transparent: true; alphaTest: 0.001; opacity: 1"
+    ></a-plane>
+
+    <a-camera wasd-controls="enabled: false"></a-camera>
   </a-scene>
 
   <script>
@@ -126,58 +110,120 @@
       `
     });
 
-    // Basic flow:
-    // 1) Wait for scene load -> hide loader, show tap overlay on mobile
-    // 2) On user tap -> unmute allowed, we keep videos paused until markerFound
-    // 3) markerFound -> show plane, play videos (unmute if user tapped)
-    // 4) markerLost  -> pause videos, hide plane
-
-    document.addEventListener('DOMContentLoaded', () => {
+    (function () {
       const scene      = document.querySelector('a-scene');
-      const loader     = document.getElementById('loader');
-      const tapOverlay = document.getElementById('tapOverlay');
-      const tapBtn     = document.getElementById('tapBtn');
+      const startBtn   = document.getElementById('startBtn');
+      const panel      = document.getElementById('panel');
+      const reticleEl  = document.getElementById('reticle');
+      const videoPlane = document.getElementById('videoPlane');
 
       const videoColor = document.getElementById('videoColor');
       const videoAlpha = document.getElementById('videoAlpha');
-      const videoPlane = document.getElementById('videoPlane');
-      const marker     = document.querySelector('a-nft');
 
       let audioUnlocked = false;
+      let placed = false;
+      let hitTestSource = null;
+      let refSpace = null;
 
-      function onSceneLoaded() {
-        // Ensure transparent clear so the camera feed shows under WebGL
+      function ensureTransparentClear() {
         if (scene.renderer) scene.renderer.setClearColor(0x000000, 0);
-        loader.classList.add('hidden');
-
-        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-        if (isMobile) tapOverlay.style.display = 'flex';
       }
 
-      if (scene.hasLoaded) onSceneLoaded();
-      else scene.addEventListener('loaded', onSceneLoaded);
+      function enterAR() {
+        // A-Frame will request an immersive-ar session when entering "VR" here.
+        scene.enterVR();
+      }
 
-      function unlockAudio() {
+      // Start AR & unlock audio (user gesture)
+      startBtn.addEventListener('click', async () => {
         audioUnlocked = true;
-        tapOverlay.classList.add('hidden');
+        // Optionally pre-warm play in muted mode to satisfy autoplay, then pause until placed
+        try {
+          videoColor.muted = true; videoAlpha.muted = true;
+          await Promise.allSettled([videoColor.play(), videoAlpha.play()]);
+          videoColor.pause(); videoAlpha.pause();
+        } catch (e) {}
+        // Hide the panel but keep #ui for dom-overlay (pointer-events none anyway)
+        panel.classList.add('hidden');
+        enterAR();
+      });
 
-        // We still keep videos paused until markerFound
-        // But we can pre-warm play() in muted mode to satisfy autoplay policies
-        videoColor.muted = true;
-        videoAlpha.muted = true;
-        videoColor.play().catch(()=>{});
-        videoAlpha.play().catch(()=>{});
-        videoColor.pause();
-        videoAlpha.pause();
-      }
+      // Once the scene is ready, enforce transparent clear
+      if (scene.hasLoaded) ensureTransparentClear();
+      else scene.addEventListener('loaded', ensureTransparentClear);
 
-      tapBtn.addEventListener('click', unlockAudio);
+      // WebXR session events via three.js XR manager
+      scene.renderer.xr.addEventListener('sessionstart', async () => {
+        ensureTransparentClear();
 
-      // Marker events from AR.js
-      marker.addEventListener('markerFound', async () => {
+        const session = scene.renderer.xr.getSession();
+        // Reference spaces
+        refSpace = await session.requestReferenceSpace('local');
+        const viewerSpace = await session.requestReferenceSpace('viewer');
+
+        // Hit test source
+        hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
+
+        // Show the reticle while we look for surfaces
+        reticleEl.setAttribute('visible', true);
+      });
+
+      scene.renderer.xr.addEventListener('sessionend', () => {
+        hitTestSource = null;
+        refSpace = null;
+        placed = false;
+        reticleEl.setAttribute('visible', false);
+        videoPlane.setAttribute('visible', false);
+        videoColor.pause(); videoAlpha.pause();
+      });
+
+      // Per-frame: update reticle from hit-test
+      scene.renderer.setAnimationLoop((time, frame) => {
+        if (!frame || !hitTestSource || !refSpace) return;
+
+        // Only keep reticle visible while content not placed
+        if (placed) {
+          reticleEl.setAttribute('visible', false);
+          return;
+        }
+
+        const results = frame.getHitTestResults(hitTestSource);
+        if (results.length > 0) {
+          const hit = results[0];
+          const pose = hit.getPose(refSpace);
+          if (pose) {
+            const { x, y, z } = pose.transform.position;
+            const q = pose.transform.orientation;
+
+            // Position the reticle on the hit surface, align with surface orientation
+            reticleEl.object3D.position.set(x, y, z);
+            reticleEl.object3D.quaternion.set(q.x, q.y, q.z, q.w);
+            reticleEl.setAttribute('visible', true);
+          }
+        } else {
+          reticleEl.setAttribute('visible', false);
+        }
+      });
+
+      // Tap to place the content on current reticle pose
+      window.addEventListener('click', async () => {
+        // Only respond to taps while in AR, with a valid reticle, and not yet placed
+        const inXR = scene.renderer.xr.isPresenting;
+        if (!inXR || placed || reticleEl.getAttribute('visible') === false) return;
+
+        placed = true;
+
+        // Snap the plane to reticle pose and orient it to face the user a bit
+        const pos = reticleEl.object3D.position.clone();
+        const rot = reticleEl.object3D.rotation.clone();
+
+        videoPlane.object3D.position.copy(pos);
+        // Keep plane upright on the surface (use reticle's yaw, zero pitch/roll)
+        videoPlane.object3D.rotation.set(-Math.PI / 2, rot.y, 0);
+
         videoPlane.setAttribute('visible', true);
 
-        // Unmute color video if user granted gesture
+        // Unmute color video if user unlocked audio
         if (audioUnlocked) {
           videoColor.muted = false;
           videoColor.volume = 0.8;
@@ -185,30 +231,14 @@
           videoColor.muted = true;
         }
 
-        // Start both videos in sync
         try {
           await Promise.all([videoAlpha.play(), videoColor.play()]);
         } catch (e) {
-          // Some devices need another user gesture; fail silently
-          console.warn('Play blocked, waiting for user gesture', e);
+          // If blocked, the next tap will try again
+          console.warn('Playback blocked:', e);
         }
       });
-
-      marker.addEventListener('markerLost', () => {
-        // Hide and pause when the marker isn't visible
-        videoPlane.setAttribute('visible', false);
-        videoColor.pause();
-        videoAlpha.pause();
-      });
-
-      // Safety: also pause videos when page visibility changes
-      document.addEventListener('visibilitychange', () => {
-        if (document.hidden) {
-          videoColor.pause();
-          videoAlpha.pause();
-        }
-      });
-    });
+    })();
   </script>
 </body>
 </html>
