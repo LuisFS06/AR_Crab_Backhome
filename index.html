@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -118,8 +119,7 @@
   <div id="reticle"></div>
 
   <a-scene
-    renderer="colorManagement: true; alpha: true; precision: medium; antialias: true;"
-    background="color: transparent;"
+    renderer="antialias: true; precision: medium; alpha: true"
     webxr="requiredFeatures: hit-test; optionalFeatures: dom-overlay; overlayElement: #tapOverlay"
     vr-mode-ui="enabled: false"
     embedded
@@ -191,12 +191,6 @@
       let placed = false;
       let hitTestSource = null;
       let refSpace = null;
-      
-      // Set renderer properties for transparency
-      scene.addEventListener('render-target-loaded', function() {
-        scene.renderer.setClearColor(0x000000, 0);
-        scene.renderer.autoClear = false;
-      });
       
       // Ensure background transparency for AR
       scene.addEventListener('enter-vr', function () {
