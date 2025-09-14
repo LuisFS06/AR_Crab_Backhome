@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Back Home AR — Marker-Fixed Video</title>
+  <title>Back Home AR — Stable Marker-Fixed Video</title>
 
-  <!-- A-Frame and AR.js (NFT marker support) -->
+  <!-- A-Frame + AR.js for NFT markers -->
   <script src="https://cdn.jsdelivr.net/gh/aframevr/aframe@1.6.0/dist/aframe-master.min.js"></script>
   <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar-nft.js"></script>
 
@@ -13,22 +13,17 @@
     #soundOverlay {
       position: fixed; inset: 0;
       display: flex; align-items: center; justify-content: center;
-      background: rgba(0, 0, 0, 0.6);
-      color: #fff; z-index: 9999;
+      background: rgba(0, 0, 0, 0.6); color: #fff; z-index: 9999;
       font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
     }
     #soundOverlay button {
-      background: #1976d2;
-      color: #fff;
-      border: none;
-      border-radius: 10px;
-      padding: 12px 18px;
-      font-weight: bold;
-      font-size: 16px;
+      background: #1976d2; color: #fff; border: none;
+      border-radius: 10px; padding: 12px 18px;
+      font-weight: bold; font-size: 16px;
     }
   </style>
 
-  <!-- Matte Shader (Color + Alpha blend) -->
+  <!-- Matte Shader -->
   <script>
     AFRAME.registerShader('video-matte', {
       schema: {
@@ -61,7 +56,7 @@
 </head>
 
 <body>
-  <!-- One-tap unlock for video audio -->
+  <!-- Mobile Audio Unlock -->
   <div id="soundOverlay">
     <div style="text-align:center">
       <p style="margin-bottom:10px;font-size:18px">Tap to enable sound 🔊</p>
@@ -84,24 +79,26 @@
              loop muted playsinline webkit-playsinline crossorigin="anonymous"></video>
     </a-assets>
 
-    <!-- Marker and content (video plane attached directly to marker) -->
+    <!-- NFT Marker: Smoothing + Events -->
     <a-nft
       type="nft"
       url="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/marker/AR_Image-tracker_Crab"
+      emitevents="true"
       smooth="true"
-      smoothCount="60"
-      smoothTolerance="0.005"
-      smoothThreshold="5"
+      smoothCount="100"
+      smoothTolerance="0.01"
+      smoothThreshold="10"
     >
+      <!-- Video Plane: Locked to marker -->
       <a-entity id="videoPlane"
         geometry="primitive: plane; width: 1.2; height: 0.67"
         material="shader: video-matte; videoColor: #videoColor; videoAlpha: #videoAlpha; transparent: true; depthWrite: false"
         position="0 0 0.1"
-        rotation="-90 0 0">
-      </a-entity>
+        rotation="-90 0 0"
+        visible="false"
+      ></a-entity>
     </a-nft>
 
-    <!-- Camera (AR.js handles pose, no user control needed) -->
     <a-entity camera look-controls="enabled: false"></a-entity>
   </a-scene>
 
@@ -110,11 +107,13 @@
     const btn = document.getElementById('soundBtn');
     const vc = document.getElementById('videoColor');
     const va = document.getElementById('videoAlpha');
+    const marker = document.querySelector('a-nft');
+    const videoPlane = document.getElementById('videoPlane');
 
-    // Preload video (muted so it can autoplay on mobile)
+    // Try autoplay silently (mobile-safe)
     Promise.allSettled([vc.play(), va.play()]);
 
-    // Wait for user interaction to enable sound
+    // Audio unlock
     btn.addEventListener('click', () => {
       vc.muted = false;
       vc.currentTime = 0;
@@ -122,6 +121,21 @@
       vc.play();
       va.play();
       overlay.style.display = 'none';
+    });
+
+    // Custom visibility logic to avoid flicker
+    let lostTimeout = null;
+
+    marker.addEventListener('markerFound', () => {
+      clearTimeout(lostTimeout);
+      videoPlane.setAttribute('visible', true);
+    });
+
+    marker.addEventListener('markerLost', () => {
+      // Delay hide to avoid flicker from quick re-detect
+      lostTimeout = setTimeout(() => {
+        videoPlane.setAttribute('visible', false);
+      }, 600); // adjust delay as needed
     });
   </script>
 </body>
