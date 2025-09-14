@@ -2,11 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Back Home AR — MindAR Stable Video (Fix)</title>
+  <title>Back Home AR — MindAR (prompt + gated audio)</title>
 
-  <!-- A-Frame (version MindAR 1.2.x is happy with) -->
+  <!-- Versions that work well together -->
   <script src="https://cdn.jsdelivr.net/npm/aframe@1.3.0/dist/aframe.min.js"></script>
-  <!-- MindAR A-Frame build -->
   <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
 
   <style>
@@ -17,50 +16,28 @@
     }
     #overlay button {
       margin-top:12px; background:#1976d2; color:#fff; border:0; border-radius:10px; padding:12px 18px; font-weight:700; font-size:16px;
-      cursor: pointer;
     }
-    #overlay button:hover {
-      background:#1565c0;
-    }
-    #overlay button:disabled {
-      background:#666; cursor: not-allowed;
-    }
+    #status { margin-top:8px; font-size:12px; opacity:.85; }
   </style>
 
   <!-- Color+Alpha matte shader -->
   <script>
     AFRAME.registerShader('video-matte', {
-      schema: {
-        videoColor: { type: 'map', is: 'uniform' },
-        videoAlpha: { type: 'map', is: 'uniform' },
-        opacity:    { type: 'number', default: 1.0, is: 'uniform' }
-      },
-      vertexShader: `
-        varying vec2 vUV;
-        void main(){ vUV=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }
-      `,
+      schema: { videoColor:{type:'map',is:'uniform'}, videoAlpha:{type:'map',is:'uniform'}, opacity:{type:'number',default:1,is:'uniform'} },
+      vertexShader: `varying vec2 vUV; void main(){ vUV=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
       fragmentShader: `
-        precision highp float;
-        varying vec2 vUV;
-        uniform sampler2D videoColor, videoAlpha;
-        uniform float opacity;
-        void main(){
-          vec4 c = texture2D(videoColor, vUV);
-          float a = texture2D(videoAlpha, vUV).r;
-          a = smoothstep(0.15, 0.95, a) * opacity;
-          gl_FragColor = vec4(c.rgb, a);
-        }
+        precision highp float; varying vec2 vUV; uniform sampler2D videoColor, videoAlpha; uniform float opacity;
+        void main(){ vec4 c=texture2D(videoColor,vUV); float a=texture2D(videoAlpha,vUV).r; a=smoothstep(0.15,0.95,a)*opacity; gl_FragColor=vec4(c.rgb,a); }
       `
     });
   </script>
 </head>
 
 <body>
-  <!-- One tap to both: request camera permission, start MindAR and enable audio -->
   <div id="overlay">
     <div>🔊 Tap to grant camera access and start AR</div>
     <button id="startBtn">Grant Camera Permission & Start</button>
-    <div id="status" style="margin-top:8px; font-size:12px; opacity:.85;"></div>
+    <div id="status"></div>
   </div>
 
   <a-scene
@@ -78,110 +55,74 @@
              loop muted playsinline webkit-playsinline crossorigin="anonymous"></video>
     </a-assets>
 
-    <!-- Track first target in targets.mind -->
-    <a-entity mindar-image-target="targetIndex: 0">
+    <!-- Target 0 -->
+    <a-entity id="markerTarget" mindar-image-target="targetIndex: 0">
       <a-plane id="videoPlane"
         width="1.2" height="0.67"
-        rotation="-90 0 0"
-        position="0 0 0"
+        rotation="-90 0 0" position="0 0 0"
+        visible="false"
         material="shader: video-matte; videoColor: #videoColor; videoAlpha: #videoAlpha; transparent: true; depthWrite: false">
       </a-plane>
     </a-entity>
 
-    <a-camera look-controls="enabled: false"></a-camera>
+    <a-camera look-controls="enabled:false"></a-camera>
   </a-scene>
 
   <script>
-    const overlay = document.getElementById('overlay');
-    const btn = document.getElementById('startBtn');
-    const statusEl = document.getElementById('status');
-    const sceneEl = document.querySelector('a-scene');
-    const vc = document.getElementById('videoColor');
-    const va = document.getElementById('videoAlpha');
+    const overlay   = document.getElementById('overlay');
+    const btn       = document.getElementById('startBtn');
+    const statusEl  = document.getElementById('status');
+    const sceneEl   = document.querySelector('a-scene');
+    const vc        = document.getElementById('videoColor');
+    const va        = document.getElementById('videoAlpha');
+    const targetEl  = document.getElementById('markerTarget');
+    const plane     = document.getElementById('videoPlane');
 
-    let cameraStream = null;
+    let mindarSystem = null;
+
+    // Wait until a-scene + systems (incl. MindAR) are initialized
+    sceneEl.addEventListener('loaded', () => {
+      mindarSystem = sceneEl.systems['mindar-image-system'];
+      if (!mindarSystem) {
+        statusEl.textContent = '❌ MindAR system not ready (script failed or version mismatch).';
+      } else {
+        statusEl.textContent = 'Ready to start 📱';
+      }
+    });
 
     // Helpful logs
-    sceneEl.addEventListener('arReady', () => { 
-      statusEl.textContent = 'AR is ready ✅ (camera started)'; 
-    });
-    
-    sceneEl.addEventListener('arError', (e) => { 
-      statusEl.textContent = 'AR error ❌ (see console)'; 
-      console.error('AR Error:', e); 
-    });
+    sceneEl.addEventListener('arReady', () => { statusEl.textContent = 'AR is ready ✅ (camera started)'; });
+    sceneEl.addEventListener('arError',  (e) => { statusEl.textContent = 'AR error ❌ (see console)'; console.error(e); });
 
-    // Check if targets.mind is reachable
-    fetch('https://raw.githubusercontent.com/alevalve/AR_Crab_Backhome/main/targets.mind', {method:'HEAD'})
-      .then(r => { 
-        if(!r.ok) throw new Error(`HTTP ${r.status}`); 
-        statusEl.textContent = 'Ready to start 📱 (videos will play only when marker is detected)';
-      })
-      .catch(err => { 
-        statusEl.textContent = `⚠️ targets.mind not reachable (${err.message})`; 
-      });
+    // Don’t autoplay on load; we’ll only play after targetFound
+    vc.pause(); va.pause();
+    vc.muted = true;
 
-    // Explicitly request camera permission and start AR
+    // Start MindAR (this triggers the camera permission prompt)
     btn.addEventListener('click', async () => {
       try {
-        btn.disabled = true;
-        statusEl.textContent = 'Requesting camera permission...';
-
-        // Step 1: Explicitly request camera permission
-        try {
-          cameraStream = await navigator.mediaDevices.getUserMedia({ 
-            video: { 
-              facingMode: 'environment' // Prefer back camera for AR
-            } 
-          });
-          statusEl.textContent = 'Camera permission granted ✅';
-        } catch (permissionError) {
-          throw new Error(`Camera permission denied: ${permissionError.message}`);
-        }
-
-        // Step 2: Prepare videos (unmute color video)
-        statusEl.textContent = 'Preparing videos...';
-        vc.muted = false;
-        vc.currentTime = 0; 
-        va.currentTime = 0;
-
-        // Some browsers need play() after unmute inside the same gesture
-        await Promise.all([
-          vc.play().catch(e => console.warn('Color video play failed:', e)),
-          va.play().catch(e => console.warn('Alpha video play failed:', e))
-        ]);
-
-        // Step 3: Now start MindAR (it should use the already-granted camera permission)
-        statusEl.textContent = 'Starting AR...';
-        const mindarSystem = sceneEl.systems['mindar-image-system'];
+        if (!mindarSystem) throw new Error('MindAR system not initialized yet.');
         await mindarSystem.start();
-
-        // Step 4: Clean up the permission stream (MindAR will create its own)
-        if (cameraStream) {
-          cameraStream.getTracks().forEach(track => track.stop());
-          cameraStream = null;
-        }
-
         overlay.style.display = 'none';
-        
       } catch (err) {
         console.error('Start failed:', err);
         statusEl.textContent = `❌ ${err.message}`;
-        btn.disabled = false;
-        
-        // Clean up camera stream if it was created
-        if (cameraStream) {
-          cameraStream.getTracks().forEach(track => track.stop());
-          cameraStream = null;
-        }
       }
     });
 
-    // Clean up on page unload
-    window.addEventListener('beforeunload', () => {
-      if (cameraStream) {
-        cameraStream.getTracks().forEach(track => track.stop());
-      }
+    // Play/stop when the marker is tracked
+    targetEl.addEventListener('targetFound', async () => {
+      plane.setAttribute('visible', true);
+      vc.muted = false;  // gesture already happened on Start
+      try { await vc.play(); } catch {}
+      try { await va.play(); } catch {}
+    });
+
+    targetEl.addEventListener('targetLost', () => {
+      plane.setAttribute('visible', false);
+      vc.pause(); va.pause();
+      vc.muted = true;
+      vc.currentTime = 0; va.currentTime = 0;
     });
   </script>
 </body>
