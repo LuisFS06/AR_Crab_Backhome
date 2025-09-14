@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -110,8 +109,8 @@
   <div id="tapOverlay">
     <div>
       <div style="font-size: 20px; margin-bottom: 10px;">AR Experience Ready</div>
-      <div style="margin-bottom: 20px;">Tap to start and enable audio</div>
-      <button id="tapBtn">Start AR</button>
+      <div style="margin-bottom: 20px;">This will request camera access for AR</div>
+      <button id="tapBtn">Enter AR Mode</button>
     </div>
   </div>
 
@@ -120,9 +119,9 @@
 
   <a-scene
     renderer="antialias: true; precision: medium; alpha: true"
-    background="transparent: true"
     webxr="requiredFeatures: hit-test; optionalFeatures: dom-overlay; overlayElement: #tapOverlay"
     vr-mode-ui="enabled: false"
+    embedded
   >
     <a-assets>
       <video id="videoColor"
@@ -152,7 +151,7 @@
       height="0.67"
       position="0 1.3 -1"
       rotation="-15 0 0"
-      material="shader: video-matte; videoColor: #videoColor; videoAlpha: #videoAlpha; transparent: true; opacity: 1.0"
+      material="shader: video-matte; videoColor: #videoColor; videoAlpha: #videoAlpha; transparent: true; alphaTest: 0.1"
       visible="false"
     ></a-plane>
 
@@ -196,6 +195,7 @@
       scene.addEventListener('enter-vr', function () {
         if (scene.is('ar-mode')) {
           // Set renderer to be transparent for AR
+          scene.renderer.setClearColor(0x000000, 0);
           scene.renderer.domElement.style.background = 'transparent';
         }
       });
@@ -252,6 +252,8 @@
         const viewerSpace = await session.requestReferenceSpace('viewer');
         hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
         
+        // Ensure transparency for AR session
+        scene.renderer.setClearColor(0x000000, 0);
       });
       
       xr.addEventListener('sessionend', function() {
