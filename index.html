@@ -4,6 +4,9 @@
   <meta charset="utf-8" />
   <title>Back Home AR</title>
   
+  <!-- Launch AR SDK -->
+  <script src="https://launchar.app/sdk/v1?key=PgCkcRz0dyNiU3cWrOBw3PIB7cFYnuu8&redirect=true"></script>
+  
   <!-- A-Frame - using stable CDN -->
   <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
   
@@ -192,29 +195,47 @@
       let hitTestSource = null;
       let refSpace = null;
       
-      // Ensure background transparency for AR
+      // Check if Launch AR is available and handle accordingly
+      const isLaunchAR = typeof window.launchar !== 'undefined';
+      
+      // Enhanced AR session handling for Launch AR compatibility
       scene.addEventListener('enter-vr', function () {
         if (scene.is('ar-mode')) {
           // Set renderer to be transparent for AR
           scene.renderer.setClearColor(0x000000, 0);
           scene.renderer.domElement.style.background = 'transparent';
+          
+          // Additional Launch AR specific initialization if needed
+          if (isLaunchAR) {
+            console.log('Launch AR detected, optimizing for mobile WebAR');
+          }
         }
       });
       
       function hideLoader() {
         loader.classList.add('hidden');
         const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-        if (isMobile) {
+        if (isMobile || isLaunchAR) {
           tapOverlay.style.display = 'flex';
         } else {
           reticle.style.display = 'block';
         }
       }
       
-      if (scene.hasLoaded) {
-        hideLoader();
+      // Wait for Launch AR SDK to be ready if present
+      function initializeExperience() {
+        if (scene.hasLoaded) {
+          hideLoader();
+        } else {
+          scene.addEventListener('loaded', hideLoader);
+        }
+      }
+      
+      // Check for Launch AR readiness
+      if (isLaunchAR && window.launchar.isReady) {
+        window.launchar.isReady().then(initializeExperience);
       } else {
-        scene.addEventListener('loaded', hideLoader);
+        initializeExperience();
       }
       
       function enableAudioAndStart() {
@@ -233,8 +254,8 @@
           videoColor.volume = 0.8;
         }
         
-        videoColor.play();
-        videoAlpha.play();
+        videoColor.play().catch(e => console.log('Video play failed:', e));
+        videoAlpha.play().catch(e => console.log('Alpha video play failed:', e));
       }
       
       tapBtn.addEventListener('click', enableAudioAndStart);
@@ -245,16 +266,33 @@
         }
       });
       
+      // Enhanced touch handling for mobile devices
+      window.addEventListener('touchend', function(e) {
+        e.preventDefault();
+        if (audioEnabled && !placed) {
+          placeContent();
+        }
+      });
+      
       const xr = scene.renderer.xr;
       
       xr.addEventListener('sessionstart', async function() {
-        const session = xr.getSession();
-        refSpace = await session.requestReferenceSpace('local');
-        const viewerSpace = await session.requestReferenceSpace('viewer');
-        hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
-        
-        // Ensure transparency for AR session
-        scene.renderer.setClearColor(0x000000, 0);
+        try {
+          const session = xr.getSession();
+          refSpace = await session.requestReferenceSpace('local');
+          const viewerSpace = await session.requestReferenceSpace('viewer');
+          hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
+          
+          // Ensure transparency for AR session
+          scene.renderer.setClearColor(0x000000, 0);
+          
+          // Launch AR specific optimizations
+          if (isLaunchAR) {
+            console.log('AR session started with Launch AR support');
+          }
+        } catch (error) {
+          console.warn('Hit test not supported, falling back to simple placement');
+        }
       });
       
       xr.addEventListener('sessionend', function() {
@@ -270,19 +308,32 @@
       scene.renderer.setAnimationLoop(function(time, frame) {
         if (!frame || !hitTestSource || !refSpace || placed) return;
         
-        const hitTestResults = frame.getHitTestResults(hitTestSource);
-        if (hitTestResults.length > 0) {
-          const hit = hitTestResults[0];
-          const pose = hit.getPose(refSpace);
-          
-          if (pose) {
-            const position = pose.transform.position;
-            const orientation = pose.transform.orientation;
+        try {
+          const hitTestResults = frame.getHitTestResults(hitTestSource);
+          if (hitTestResults.length > 0) {
+            const hit = hitTestResults[0];
+            const pose = hit.getPose(refSpace);
             
-            videoPlane.object3D.position.set(position.x, position.y, position.z);
-            videoPlane.object3D.quaternion.set(orientation.x, orientation.y, orientation.z, orientation.w);
+            if (pose) {
+              const position = pose.transform.position;
+              const orientation = pose.transform.orientation;
+              
+              videoPlane.object3D.position.set(position.x, position.y, position.z);
+              videoPlane.object3D.quaternion.set(orientation.x, orientation.y, orientation.z, orientation.w);
+            }
           }
+        } catch (error) {
+          // Silently handle hit test errors
         }
+      });
+      
+      // Error handling for video loading
+      videoColor.addEventListener('error', function(e) {
+        console.error('Color video failed to load:', e);
+      });
+      
+      videoAlpha.addEventListener('error', function(e) {
+        console.error('Alpha video failed to load:', e);
       });
     });
   </script>
