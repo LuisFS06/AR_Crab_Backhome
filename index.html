@@ -2,28 +2,44 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Back Home AR — Stable Marker-Fixed Video</title>
+  <title>Back Home AR — MindAR Stable Video</title>
 
-  <!-- A-Frame + AR.js for NFT markers -->
-  <script src="https://cdn.jsdelivr.net/gh/aframevr/aframe@1.6.0/dist/aframe-master.min.js"></script>
-  <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar-nft.js"></script>
+  <!-- A-Frame and MindAR -->
+  <script src="https://cdn.jsdelivr.net/npm/aframe@1.4.2/dist/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/aframe/mindar-image-aframe.prod.js"></script>
 
   <style>
-    html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+    }
+
     #soundOverlay {
-      position: fixed; inset: 0;
-      display: flex; align-items: center; justify-content: center;
-      background: rgba(0, 0, 0, 0.6); color: #fff; z-index: 9999;
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.6);
+      color: #fff;
+      z-index: 9999;
       font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
     }
+
     #soundOverlay button {
-      background: #1976d2; color: #fff; border: none;
-      border-radius: 10px; padding: 12px 18px;
-      font-weight: bold; font-size: 16px;
+      background: #1976d2;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      padding: 12px 18px;
+      font-weight: bold;
+      font-size: 16px;
     }
   </style>
 
-  <!-- Matte Shader -->
+  <!-- Custom Shader: Color + Alpha blending -->
   <script>
     AFRAME.registerShader('video-matte', {
       schema: {
@@ -56,7 +72,7 @@
 </head>
 
 <body>
-  <!-- Mobile Audio Unlock -->
+  <!-- Tap to enable audio -->
   <div id="soundOverlay">
     <div style="text-align:center">
       <p style="margin-bottom:10px;font-size:18px">Tap to enable sound 🔊</p>
@@ -65,12 +81,14 @@
   </div>
 
   <a-scene
+    mindar-image="imageTargetSrc: https://raw.githubusercontent.com/alevalve/AR_Crab_Backhome/main/targets.mind; autoStart: true"
     vr-mode-ui="enabled: false"
+    device-orientation-permission-ui="enabled: true"
+    renderer="colorManagement: true, physicallyCorrectLights"
     embedded
-    renderer="antialias: true; alpha: true; precision: medium"
-    arjs="sourceType: webcam; trackingMethod: best; debugUIEnabled: false"
   >
     <a-assets>
+      <!-- Color and Alpha videos -->
       <video id="videoColor"
              src="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/AR_Video02_Color.mp4"
              loop muted playsinline webkit-playsinline crossorigin="anonymous"></video>
@@ -79,27 +97,20 @@
              loop muted playsinline webkit-playsinline crossorigin="anonymous"></video>
     </a-assets>
 
-    <!-- NFT Marker: Smoothing + Events -->
-    <a-nft
-      type="nft"
-      url="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/marker/AR_Image-tracker_Crab"
-      emitevents="true"
-      smooth="true"
-      smoothCount="100"
-      smoothTolerance="0.01"
-      smoothThreshold="10"
-    >
-      <!-- Video Plane: Locked to marker -->
-      <a-entity id="videoPlane"
-        geometry="primitive: plane; width: 1.2; height: 0.67"
-        material="shader: video-matte; videoColor: #videoColor; videoAlpha: #videoAlpha; transparent: true; depthWrite: false"
-        position="0 0 0.1"
+    <!-- MindAR target (index 0 = first marker in targets.mind) -->
+    <a-entity mindar-image-target="targetIndex: 0">
+      <a-plane
+        id="videoPlane"
+        width="1.2"
+        height="0.67"
         rotation="-90 0 0"
-        visible="false"
-      ></a-entity>
-    </a-nft>
+        material="shader: video-matte; videoColor: #videoColor; videoAlpha: #videoAlpha; transparent: true; depthWrite: false"
+        position="0 0 0"
+      ></a-plane>
+    </a-entity>
 
-    <a-entity camera look-controls="enabled: false"></a-entity>
+    <!-- Camera -->
+    <a-camera look-controls="enabled: false"></a-camera>
   </a-scene>
 
   <script>
@@ -107,13 +118,11 @@
     const btn = document.getElementById('soundBtn');
     const vc = document.getElementById('videoColor');
     const va = document.getElementById('videoAlpha');
-    const marker = document.querySelector('a-nft');
-    const videoPlane = document.getElementById('videoPlane');
 
-    // Try autoplay silently (mobile-safe)
+    // Attempt autoplay (muted)
     Promise.allSettled([vc.play(), va.play()]);
 
-    // Audio unlock
+    // Unlock audio on tap
     btn.addEventListener('click', () => {
       vc.muted = false;
       vc.currentTime = 0;
@@ -121,21 +130,6 @@
       vc.play();
       va.play();
       overlay.style.display = 'none';
-    });
-
-    // Custom visibility logic to avoid flicker
-    let lostTimeout = null;
-
-    marker.addEventListener('markerFound', () => {
-      clearTimeout(lostTimeout);
-      videoPlane.setAttribute('visible', true);
-    });
-
-    marker.addEventListener('markerLost', () => {
-      // Delay hide to avoid flicker from quick re-detect
-      lostTimeout = setTimeout(() => {
-        videoPlane.setAttribute('visible', false);
-      }, 600); // adjust delay as needed
     });
   </script>
 </body>
