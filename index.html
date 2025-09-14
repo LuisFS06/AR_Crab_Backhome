@@ -17,6 +17,13 @@
     }
     #overlay button {
       margin-top:12px; background:#1976d2; color:#fff; border:0; border-radius:10px; padding:12px 18px; font-weight:700; font-size:16px;
+      cursor: pointer;
+    }
+    #overlay button:hover {
+      background:#1565c0;
+    }
+    #overlay button:disabled {
+      background:#666; cursor: not-allowed;
     }
   </style>
 
@@ -49,10 +56,10 @@
 </head>
 
 <body>
-  <!-- One tap to both: start MindAR (camera) and enable audio -->
+  <!-- One tap to both: request camera permission, start MindAR and enable audio -->
   <div id="overlay">
-    <div>Tap to start AR and enable sound 🔊</div>
-    <button id="startBtn">Start</button>
+    <div>🔊 Tap to grant camera access and start AR</div>
+    <button id="startBtn">Grant Camera Permission & Start</button>
     <div id="status" style="margin-top:8px; font-size:12px; opacity:.85;"></div>
   </div>
 
@@ -92,34 +99,88 @@
     const vc = document.getElementById('videoColor');
     const va = document.getElementById('videoAlpha');
 
+    let cameraStream = null;
+
     // Helpful logs
-    sceneEl.addEventListener('arReady', () => { statusEl.textContent = 'AR is ready ✅ (camera started)'; });
-    sceneEl.addEventListener('arError', (e) => { statusEl.textContent = 'AR error ❌ (see console)'; console.error(e); });
+    sceneEl.addEventListener('arReady', () => { 
+      statusEl.textContent = 'AR is ready ✅ (camera started)'; 
+    });
+    
+    sceneEl.addEventListener('arError', (e) => { 
+      statusEl.textContent = 'AR error ❌ (see console)'; 
+      console.error('AR Error:', e); 
+    });
 
-    // If targets.mind fails to load, you'll see it in the network tab; also:
+    // Check if targets.mind is reachable
     fetch('https://raw.githubusercontent.com/alevalve/AR_Crab_Backhome/main/targets.mind', {method:'HEAD'})
-      .then(r => { if(!r.ok) throw new Error(r.status); })
-      .catch(err => { statusEl.textContent = `targets.mind not reachable (${err})`; });
+      .then(r => { 
+        if(!r.ok) throw new Error(`HTTP ${r.status}`); 
+        statusEl.textContent = 'Ready to start 📱';
+      })
+      .catch(err => { 
+        statusEl.textContent = `⚠️ targets.mind not reachable (${err.message})`; 
+      });
 
-    // Start flow: user gesture -> unmute + start videos -> start MindAR (camera)
+    // Explicitly request camera permission and start AR
     btn.addEventListener('click', async () => {
       try {
-        // Unmute color video; alpha stays muted
+        btn.disabled = true;
+        statusEl.textContent = 'Requesting camera permission...';
+
+        // Step 1: Explicitly request camera permission
+        try {
+          cameraStream = await navigator.mediaDevices.getUserMedia({ 
+            video: { 
+              facingMode: 'environment' // Prefer back camera for AR
+            } 
+          });
+          statusEl.textContent = 'Camera permission granted ✅';
+        } catch (permissionError) {
+          throw new Error(`Camera permission denied: ${permissionError.message}`);
+        }
+
+        // Step 2: Prepare videos (unmute color video)
+        statusEl.textContent = 'Preparing videos...';
         vc.muted = false;
-        vc.currentTime = 0; va.currentTime = 0;
+        vc.currentTime = 0; 
+        va.currentTime = 0;
 
         // Some browsers need play() after unmute inside the same gesture
-        await vc.play().catch(()=>{});
-        await va.play().catch(()=>{});
+        await Promise.all([
+          vc.play().catch(e => console.warn('Color video play failed:', e)),
+          va.play().catch(e => console.warn('Alpha video play failed:', e))
+        ]);
 
-        // Start MindAR (triggers camera permission prompt)
+        // Step 3: Now start MindAR (it should use the already-granted camera permission)
+        statusEl.textContent = 'Starting AR...';
         const mindarSystem = sceneEl.systems['mindar-image-system'];
         await mindarSystem.start();
 
+        // Step 4: Clean up the permission stream (MindAR will create its own)
+        if (cameraStream) {
+          cameraStream.getTracks().forEach(track => track.stop());
+          cameraStream = null;
+        }
+
         overlay.style.display = 'none';
+        
       } catch (err) {
         console.error('Start failed:', err);
-        statusEl.textContent = 'Start failed (see console) — check HTTPS and camera permissions.';
+        statusEl.textContent = `❌ ${err.message}`;
+        btn.disabled = false;
+        
+        // Clean up camera stream if it was created
+        if (cameraStream) {
+          cameraStream.getTracks().forEach(track => track.stop());
+          cameraStream = null;
+        }
+      }
+    });
+
+    // Clean up on page unload
+    window.addEventListener('beforeunload', () => {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
       }
     });
   </script>
