@@ -4,7 +4,6 @@
   <meta charset="utf-8" />
   <title>Back Home AR — Fixed Version</title>
   
-  <!-- A-Frame - using stable CDN -->
   <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
   
   <style>
@@ -12,22 +11,6 @@
       margin: 0; 
       height: 100%; 
       overflow: hidden; 
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; 
-    }
-    
-    #loader {
-      position: fixed; 
-      top: 0; 
-      left: 0; 
-      width: 100%; 
-      height: 100%; 
-      background: rgba(0,0,0,0.85); 
-      color: #fff; 
-      display: flex; 
-      align-items: center; 
-      justify-content: center; 
-      z-index: 1000;
-      font-size: 18px;
     }
     
     #tapOverlay {
@@ -38,15 +21,14 @@
       height: 100%; 
       background: rgba(0,0,0,0.7); 
       color: #fff; 
-      display: none; 
+      display: flex; 
       align-items: center; 
       justify-content: center; 
       text-align: center; 
-      z-index: 1001;
+      z-index: 1000;
     }
     
     #tapOverlay button {
-      margin-top: 20px; 
       padding: 15px 25px; 
       border: 0; 
       border-radius: 8px; 
@@ -54,34 +36,13 @@
       background: #1976d2; 
       font-weight: bold; 
       font-size: 16px;
-      cursor: pointer;
     }
     
     .hidden { 
       display: none !important; 
     }
-    
-    a-scene {
-      height: 100vh;
-      width: 100vw;
-    }
-
-    #reticle {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      width: 40px;
-      height: 40px;
-      border: 2px solid #fff;
-      border-radius: 50%;
-      transform: translate(-50%, -50%);
-      pointer-events: none;
-      z-index: 100;
-      display: none;
-    }
   </style>
 
-  <!-- Fragment shader for video + alpha compositing -->
   <script id="matte-shader" type="x-shader/x-fragment">
     precision mediump float;
     uniform sampler2D videoColor;
@@ -98,29 +59,19 @@
 </head>
 
 <body>
-  <!-- Loader -->
-  <div id="loader">
-    <div>Loading AR Experience...</div>
-  </div>
-
-  <!-- Audio unlock overlay -->
   <div id="tapOverlay">
     <div>
-      <div style="font-size: 20px; margin-bottom: 10px;">AR Experience Ready</div>
-      <div style="margin-bottom: 20px;">Tap to start and enable audio</div>
-      <button id="tapBtn">Start AR</button>
+      <div style="margin-bottom: 20px;">Tap to place AR content</div>
+      <button id="startBtn">Start AR</button>
     </div>
   </div>
 
-  <!-- Reticle for placement -->
-  <div id="reticle"></div>
-
   <a-scene
-    renderer="antialias: true; precision: medium"
-    background="color: transparent"
-    webxr="requiredFeatures: hit-test; optionalFeatures: dom-overlay; overlayElement: #tapOverlay"
+    renderer="antialias: false; alpha: true"
+    webxr="requiredFeatures: hit-test"
     vr-mode-ui="enabled: false"
     embedded
+    style="height: 100vh; width: 100vw;"
   >
     <a-assets>
       <video id="videoColor"
@@ -129,8 +80,7 @@
              loop 
              muted 
              crossorigin="anonymous" 
-             playsinline 
-             webkit-playsinline>
+             playsinline>
       </video>
       <video id="videoAlpha"
              src="https://raw.githack.com/alevalve/AR_Crab_Backhome/main/AR_Video02_Alpha.mp4"
@@ -138,27 +88,23 @@
              loop 
              muted 
              crossorigin="anonymous" 
-             playsinline 
-             webkit-playsinline>
+             playsinline>
       </video>
     </a-assets>
 
-    <!-- Video plane with alpha compositing - hidden until placed -->
     <a-plane
       id="videoPlane"
       width="1.2"
       height="0.67"
-      position="0 0 -2"
       rotation="-90 0 0"
-      material="shader: video-matte; videoColor: #videoColor; videoAlpha: #videoAlpha; transparent: true; alphaTest: 0.1"
+      material="shader: video-matte; videoColor: #videoColor; videoAlpha: #videoAlpha; transparent: true"
       visible="false"
     ></a-plane>
 
-    <a-camera wasd-controls="enabled: false"></a-camera>
+    <a-camera></a-camera>
   </a-scene>
 
   <script>
-    // Register the video-matte shader
     AFRAME.registerShader('video-matte', {
       schema: {
         videoColor: { type: 'map', is: 'uniform' },
@@ -174,102 +120,69 @@
         }
       `
     });
+
+    const tapOverlay = document.getElementById('tapOverlay');
+    const startBtn = document.getElementById('startBtn');
+    const videoPlane = document.getElementById('videoPlane');
+    const videoColor = document.getElementById('videoColor');
+    const videoAlpha = document.getElementById('videoAlpha');
+    const scene = document.querySelector('a-scene');
     
-    document.addEventListener('DOMContentLoaded', function() {
-      const scene = document.querySelector('a-scene');
-      const loader = document.getElementById('loader');
-      const tapOverlay = document.getElementById('tapOverlay');
-      const tapBtn = document.getElementById('tapBtn');
-      const reticle = document.getElementById('reticle');
-      const videoPlane = document.getElementById('videoPlane');
-      const videoColor = document.getElementById('videoColor');
-      const videoAlpha = document.getElementById('videoAlpha');
-      
-      let audioEnabled = false;
-      let placed = false;
-      let hitTestSource = null;
-      let refSpace = null;
-      
-      function hideLoader() {
-        loader.classList.add('hidden');
-        const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-        if (isMobile) {
-          tapOverlay.style.display = 'flex';
-        } else {
-          reticle.style.display = 'block';
-        }
-      }
-      
-      if (scene.hasLoaded) {
-        hideLoader();
-      } else {
-        scene.addEventListener('loaded', hideLoader);
-      }
-      
-      function enableAudioAndStart() {
-        audioEnabled = true;
-        tapOverlay.classList.add('hidden');
-        // Reticle will show when AR session starts
-      }
-      
-      function placeContent() {
+    let placed = false;
+    let hitTestSource = null;
+    let refSpace = null;
+
+    startBtn.addEventListener('click', function() {
+      tapOverlay.classList.add('hidden');
+    });
+
+    // AR session events
+    scene.renderer.xr.addEventListener('sessionstart', async function() {
+      const session = scene.renderer.xr.getSession();
+      refSpace = await session.requestReferenceSpace('local');
+      const viewerSpace = await session.requestReferenceSpace('viewer');
+      hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
+    });
+
+    scene.renderer.xr.addEventListener('sessionend', function() {
+      placed = false;
+      hitTestSource = null;
+      refSpace = null;
+      videoPlane.setAttribute('visible', false);
+      videoColor.pause();
+      videoAlpha.pause();
+    });
+
+    // Click to place
+    window.addEventListener('click', function() {
+      if (hitTestSource && !placed) {
         placed = true;
-        reticle.style.display = 'none';
         videoPlane.setAttribute('visible', true);
         
-        if (audioEnabled) {
-          videoColor.muted = false;
-          videoColor.volume = 0.8;
-        }
-        
+        videoColor.muted = false;
+        videoColor.volume = 0.8;
         videoColor.play();
         videoAlpha.play();
       }
-      
-      tapBtn.addEventListener('click', enableAudioAndStart);
-      
-      window.addEventListener('click', function() {
-        if (audioEnabled && !placed) {
-          placeContent();
-        }
-      });
-      
-      const xr = scene.renderer.xr;
-      
-      xr.addEventListener('sessionstart', async function() {
-        const session = xr.getSession();
-        refSpace = await session.requestReferenceSpace('local');
-        const viewerSpace = await session.requestReferenceSpace('viewer');
-        hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
-      });
-      
-      xr.addEventListener('sessionend', function() {
-        hitTestSource = null;
-        refSpace = null;
-        placed = false;
-        videoColor.pause();
-        videoAlpha.pause();
-        videoPlane.setAttribute('visible', false);
-        reticle.style.display = 'none';
-      });
-      
-      scene.renderer.setAnimationLoop(function(time, frame) {
-        if (!frame || !hitTestSource || !refSpace || placed) return;
+    });
+
+    // Hit test animation loop
+    scene.renderer.setAnimationLoop(function(time, frame) {
+      if (!frame || !hitTestSource || !refSpace || placed) return;
+
+      const hitTestResults = frame.getHitTestResults(hitTestSource);
+      if (hitTestResults.length > 0) {
+        const hit = hitTestResults[0];
+        const pose = hit.getPose(refSpace);
         
-        const hitTestResults = frame.getHitTestResults(hitTestSource);
-        if (hitTestResults.length > 0) {
-          const hit = hitTestResults[0];
-          const pose = hit.getPose(refSpace);
+        if (pose) {
+          const position = pose.transform.position;
+          const orientation = pose.transform.orientation;
           
-          if (pose) {
-            const position = pose.transform.position;
-            const orientation = pose.transform.orientation;
-            
-            videoPlane.object3D.position.set(position.x, position.y, position.z);
-            videoPlane.object3D.quaternion.set(orientation.x, orientation.y, orientation.z, orientation.w);
-          }
+          videoPlane.object3D.position.set(position.x, position.y, position.z);
+          videoPlane.object3D.quaternion.set(orientation.x, orientation.y, orientation.z, orientation.w);
         }
-      });
+      }
     });
   </script>
 </body>
