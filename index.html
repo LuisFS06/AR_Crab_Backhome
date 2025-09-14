@@ -196,7 +196,6 @@
       scene.addEventListener('enter-vr', function () {
         if (scene.is('ar-mode')) {
           // Set renderer to be transparent for AR
-          scene.renderer.setClearColor(0x000000, 0);
           scene.renderer.domElement.style.background = 'transparent';
         }
       });
@@ -253,8 +252,6 @@
         const viewerSpace = await session.requestReferenceSpace('viewer');
         hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
         
-        // Ensure transparency for AR session
-        scene.renderer.setClearColor(0x000000, 0);
       });
       
       xr.addEventListener('sessionend', function() {
